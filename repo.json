@@ -1,0 +1,8 @@
+{
+  "name": "movieflick",
+  "description": "movieflick CloudStream Extensions | 149",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/msujoy149/Movie-Flick/builds/plugins.json"
+  ]
+}
