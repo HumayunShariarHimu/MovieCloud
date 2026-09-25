@@ -2,16 +2,15 @@ import com.android.build.gradle.BaseExtension
 import com.lagradost.cloudstream3.gradle.CloudstreamExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
-
 buildscript {
- repositories { google(); mavenCentral(); gradlePluginPortal(); maven("https://jitpack.io") }
+ repositories { google(); mavenCentral(); gradlePluginPortal(); mavenLocal(); maven("https://jitpack.io") }
  dependencies {
   classpath("com.android.tools.build:gradle:8.7.3")
-  classpath("com.github.recloudstream:gradle:-SNAPSHOT")
+  classpath("com.lagradost.cloudstream3:gradle:local-SNAPSHOT")
   classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
  }
 }
-allprojects { repositories { google(); mavenCentral(); maven("https://jitpack.io") } }
+allprojects { repositories { google(); mavenCentral(); mavenLocal(); maven("https://jitpack.io") } }
 fun Project.cloudstream(configuration: CloudstreamExtension.() -> Unit) = extensions.getByName<CloudstreamExtension>("cloudstream").configuration()
 fun Project.android(configuration: BaseExtension.() -> Unit) = extensions.getByName<BaseExtension>("android").configuration()
 subprojects {
