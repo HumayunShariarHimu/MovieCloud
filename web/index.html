@@ -61,7 +61,7 @@
         <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search providers…" autocomplete="off"></label>
         <select id="filter" aria-label="Filter providers">
           <option value="all">All providers</option>
-          <option value="jar">Has JAR</option>
+          <option value="jar">JAR available</option>
           
         </select>
       </div>
@@ -76,10 +76,10 @@
         <h2>Install a provider in CloudStream</h2>
         <ol>
           <li>Open a provider card and choose <b>CS3</b> for the CloudStream plugin package.</li>
-          <li>Use <b>JAR</b> where available for the Java plugin artifact.</li>
+          <li>The <b>JAR</b> control remains visible on every card and becomes active automatically if a separate JAR artifact is published.</li>
           <li>In CloudStream, install the downloaded plugin or add the repository URL when your setup supports repository manifests.</li>
         </ol>
-        <p class="note">Build artifacts are served from the <code>builds</code> branch of your MovieCloud repository. The source repository is separate from the artifact branch.</p>
+        <p class="note">CloudStream installs the published <b>CS3</b> package. The current MovieCloud build does not publish separate JAR files, so the JAR control remains visible but disabled instead of disappearing.</p>
       </div>
       <div class="install-code">
         <div class="code-head"><span>ARTIFACT ROOT</span><button id="copyRoot">Copy</button></div>
