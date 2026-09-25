@@ -75,11 +75,11 @@
         <div class="section-kicker">QUICK START</div>
         <h2>Install a provider in CloudStream</h2>
         <ol>
-          <li>Open a provider card and choose <b>CS3</b> for the CloudStream plugin package, or choose <b>Streaming</b> to open that provider’s web workspace.</li>
+          <li>Open a provider card and choose <b>CS3</b> for the CloudStream plugin package, or choose <b>Media Player</b> to open that provider’s source map and player.</li>
           <li>The <b>JAR</b> control is functional: when no real JAR exists it opens the artifact explanation instead of acting like a dead link.</li>
-          <li>For third-party websites, the workspace first tries an embedded browser view. If the provider blocks embedding, use <b>Open externally</b>.</li>
+          <li>Use <b>Media Player</b> with an authorized direct MP4/HLS source. The provider source map remains visible beside the player.</li>
         </ol>
-        <p class="note">CloudStream uses the published <b>CS3</b> package. The streaming workspace below each provider gives browser access where a public endpoint is available, with an external fallback when embedding is blocked.</p>
+        <p class="note">CloudStream uses the published <b>CS3</b> package. The streaming workspace below each provider uses repository-derived source details and an optional direct-media player; provider pages are never loaded in an iframe.</p>
       </div>
       <div class="install-code">
         <div class="code-head"><span>ARTIFACT ROOT</span><button id="copyRoot">Copy</button></div>
@@ -104,5 +104,7 @@
   </footer>
 
   <script src="./app.js"></script>
-</body>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  <script src="./provider-data.js"></script>
+  </body>
 </html>

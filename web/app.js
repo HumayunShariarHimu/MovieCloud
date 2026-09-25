@@ -23,18 +23,9 @@ MovieBox:"https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/
 };
 
 const STREAMING={
-CinePlexFTP:{url:"http://cineplexbd.net",label:"CinePlexBD",mode:"web"},
-CTGFTP:{url:"https://ctgmovies.com",label:"CTG Movies",mode:"web"},
-DiscoveryFTP:{url:"http://movies.discoveryftp.net",label:"Discovery Movies",mode:"web"},
-HiAnime:{url:"https://hianime.at",label:"HiAnime",mode:"web"},
-KhulnaPlex:{url:"http://khulnaplex.com",label:"KhulnaPlex",mode:"web"},
-MojaLoss:{url:"https://www.mojaloss.stream",label:"MojaLoss",mode:"web"},
-MovieHaat:{url:"https://moviehaat.net",label:"MovieHaat",mode:"web"},
-MovieLinkBD:{url:"https://movielinkbd.tv",label:"MovieLinkBD",mode:"web"},
-OnlineMovies:{url:"https://111.90.159.132",label:"OnlineMovies",mode:"web"},
-YouTube:{url:"https://www.youtube.com",label:"YouTube",mode:"youtube"},
-YouTubeKids:{url:"https://www.youtube.com/kids",label:"YouTube Kids",mode:"youtube"}
+  BasPlayFTP:{url:null,label:"BasPlayFTP",mode:"direct"},CinePlexFTP:{url:"http://cineplexbd.net",label:"CinePlexBD",mode:"direct"},CTGFTP:{url:"https://ctgmovies.com",label:"CTG Movies",mode:"direct"},DhakaFTP:{url:null,label:"DhakaFTP",mode:"direct"},DiscoveryFTP:{url:"https://movies.discoveryftp.net",label:"Discovery Movies",mode:"direct"},HiAnime:{url:"https://hianime.at",label:"HiAnime",mode:"direct"},KhulnaPlex:{url:"http://khulnaplex.com",label:"KhulnaPlex",mode:"direct"},MojaLoss:{url:"https://www.mojaloss.stream",label:"MojaLoss",mode:"direct"},MovieHaat:{url:"https://moviehaat.net",label:"MovieHaat",mode:"direct"},MovieLinkBD:{url:"https://movielinkbd.tv",label:"MovieLinkBD",mode:"direct"},OnlineMovies:{url:"https://111.90.159.132",label:"OnlineMovies",mode:"direct"},YouTube:{url:"https://www.youtube.com",label:"YouTube",mode:"direct"},YouTubeKids:{url:"https://www.youtube.com/kids",label:"YouTube Kids",mode:"direct"},Zoryva:{url:"https://zoryva.me",label:"Zoryva",mode:"direct"},MovieBox:{url:"https://movieboxonline.net",label:"MovieBox",mode:"direct"}
 };
+const PROVIDER_DETAILS=window.MOVIECLOUD_PROVIDER_DETAILS||{};
 
 const providers=[
 {name:"BasPlayFTP",desc:"Bangla movie and series provider."},
@@ -65,16 +56,16 @@ function streamFor(name){return STREAMING[name]||null;}
 function iconFor(name){const u=ICONS[name];return u?'<img class="icon icon-svg" src="'+u+'" alt="'+esc(name)+' icon" loading="lazy">':'<span class="icon fallback" aria-hidden="true">MC</span>';}
 
 function card(p){
- const cs3=fileFor(p.name,"cs3"),jar=fileFor(p.name,"jar"),stream=streamFor(p.name);
+ const cs3=fileFor(p.name,"cs3"),jar=fileFor(p.name,"jar"),stream=streamFor(p.name),detail=PROVIDER_DETAILS[p.name]||{};
  const status=artifactState==="loading"?'<span class="availability">Checking…</span>':artifactState==="unavailable"?'<span class="availability fail">Index unavailable</span>':cs3?'<span class="availability ok">CS3 ready</span>':'<span class="availability fail">CS3 missing</span>';
  const jarAction=jar?'<a class="jar-action" href="'+jar+'" target="_blank" rel="noopener noreferrer">JAR ↗</a>':'<button class="disabled jar-action jar-help" type="button" data-jar-help="'+esc(p.name)+'" title="No separate JAR artifact is published">JAR</button>';
- const streamAction=stream?'<button class="stream-action" type="button" data-stream="'+esc(p.name)+'">Streaming ▶</button>':'<button class="stream-action unavailable-stream" type="button" data-stream="'+esc(p.name)+'">Streaming info</button>';
+ const site=detail.site?'<a class="site-link" href="'+esc(detail.site)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':'<span class="site-link disabled">Network source</span>';
  return '<article class="card" data-name="'+p.name.toLowerCase()+'" data-jar="'+Boolean(jar)+'" data-streaming="'+Boolean(stream)+'">'+status+
- '<div class="card-head">'+iconFor(p.name)+'<div><h3>'+esc(p.name)+'</h3><span class="tag">CloudStream provider</span></div></div>'+
+ '<div class="card-head">'+iconFor(p.name)+'<div><h3>'+esc(p.name)+'</h3><span class="tag">'+esc(detail.media||"CloudStream provider")+'</span></div></div>'+
  '<p class="card-desc">'+esc(p.desc)+'</p><div class="actions">'+
  (cs3?'<a class="cs3" href="'+cs3+'" target="_blank" rel="noopener noreferrer">CS3 ↗</a>':'<span class="disabled">CS3 missing</span>')+
- jarAction+'<a href="'+sourceFor(p.name)+'" target="_blank" rel="noopener noreferrer">Source ↗</a></div>'+
- '<div class="stream-row">'+streamAction+'</div></article>';
+ jarAction+'<button class="details-action" type="button" data-provider-detail="'+esc(p.name)+'">Details</button></div>'+
+ '<div class="stream-row"><div class="source-line">'+site+'<span class="source-type">'+esc(detail.engine||"CloudStream")+'</span></div><button class="stream-action" type="button" data-stream="'+esc(p.name)+'">Media Player ▶</button></div></article>';
 }
 
 function render(){
@@ -88,6 +79,7 @@ function render(){
 function bindCardActions(){
  document.querySelectorAll("[data-stream]").forEach(btn=>btn.addEventListener("click",()=>openStreaming(btn.dataset.stream)));
  document.querySelectorAll("[data-jar-help]").forEach(btn=>btn.addEventListener("click",()=>showJarHelp(btn.dataset.jarHelp)));
+ document.querySelectorAll("[data-provider-detail]").forEach(btn=>btn.addEventListener("click",()=>showProviderDetails(btn.dataset.providerDetail)));
 }
 
 function ensureModal(){
@@ -124,56 +116,39 @@ function directMediaUrl(value){
 }
 
 function openStreaming(name){
-  ensureModal();
-  const cfg=streamFor(name);
-  $("#streamTitle").textContent=name+" · Media Player";
-  $("#streamSubtitle").textContent="Direct HLS/MP4 playback through the project's allowlisted media gateway.";
-
-  $("#streamBody").innerHTML='<div class="tool-card">'+
-    '<label for="mediaInput">Authorized direct media URL (HLS .m3u8 or MP4)</label>'+
-    '<div class="inline-form"><input id="mediaInput" type="url" placeholder="https://your-domain.example/video.m3u8">'+
-    '<button id="loadMedia" class="btn primary" type="button">Play</button></div>'+
-    '<div class="quick-links">'+
-      (cfg?.url?'<a href="'+esc(cfg.url)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':"")+
-      '<span>Only allowlisted/authorized media hosts are relayed.</span>'+
-    '</div></div>'+
-    '<div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Enter an authorized HLS or MP4 URL to start playback.</p></div></div>'+
-    '<div class="browser-note"><b>Server gateway:</b> MovieCloud no longer loads provider pages in an iframe. The Vercel Function relays media bytes only for domains explicitly configured in <code>ALLOWED_STREAM_HOSTS</code>, preserving Range requests for seeking.</div>'+
-    '<div class="viewer-footer"><span>For sources you own or are authorized to relay.</span></div>';
-
-  $("#loadMedia").addEventListener("click",()=>{
-    const media=directMediaUrl($("#mediaInput").value);
-    if(!media){
-      $("#mediaInput").focus();
-      $("#mediaInput").classList.add("input-error");
-      return;
-    }
-    $("#mediaInput").classList.remove("input-error");
-    const gateway="/api/stream?url="+encodeURIComponent(media);
-    const ext=media.split("?")[0].toLowerCase();
-    const type=ext.endsWith(".m3u8")?"application/x-mpegURL":"video/mp4";
-    $("#playerShell").innerHTML='<video class="player-frame native-player" controls playsinline preload="metadata" crossorigin="anonymous">'+
-      '<source src="'+esc(gateway)+'" type="'+type+'">'+
-      'Your browser does not support HTML5 video.</video>'+
-      '<div class="player-error" hidden></div>';
-    const video=$("#playerShell video");
-    video.play().catch(()=>{});
-    video.addEventListener("error",()=>{
-      const e=$("#playerShell .player-error");
-      e.hidden=false;
-      e.textContent="Playback failed. Check that the source is a direct HLS/MP4 URL and its host is configured in Vercel ALLOWED_STREAM_HOSTS.";
-    });
-  });
-
-  $("#streamModal").hidden=false;
-  document.body.classList.add("modal-open");
-  setTimeout(()=>$(".modal-close")?.focus(),0);
+ ensureModal();
+ const detail=PROVIDER_DETAILS[name]||{};
+ $("#streamTitle").textContent=name+" · Media Player";
+ $("#streamSubtitle").textContent="Native video playback workspace — no provider iframe.";
+ const site=detail.site?'<a class="btn ghost" href="'+esc(detail.site)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':"";
+ const caps=(detail.capabilities||[]).map(x=>'<li>'+esc(x)+'</li>').join("");
+ $("#streamBody").innerHTML='<div class="stream-layout"><aside class="source-panel"><div class="section-kicker">PROVIDER SOURCE MAP</div><h3>'+esc(detail.label||name)+'</h3><p class="source-engine">'+esc(detail.engine||"CloudStream provider")+'</p><div class="source-meta"><span>Media</span><b>'+esc(detail.media||"Direct media")+'</b></div><ul class="capability-list">'+caps+'</ul><div class="source-path"><span>Repository source</span><code>'+esc(detail.source||"")+'</code></div><p class="source-note">'+esc(detail.note||"Use an authorized direct media URL for browser playback.")+'</p><div class="info-actions">'+site+'<button class="btn primary" type="button" data-close-stream>Close</button></div></aside><section class="player-panel"><div class="tool-card"><label for="mediaInput">Authorized direct media URL <span>(optional)</span></label><div class="inline-form"><input id="mediaInput" type="url" inputmode="url" autocomplete="off" placeholder="https://your-domain.example/video.m3u8 or .mp4"><button id="loadMedia" class="btn primary" type="button">Play</button></div><div class="quick-links"><span>MP4 and HLS are supported when the source is authorized and allowlisted.</span></div></div><div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Enter a direct media URL to start playback.</p></div></div><div class="player-status" id="playerStatus" role="status">Ready — media URL is optional until you have a direct playable source.</div></section></div><div class="browser-note"><b>Architecture:</b> the repository CloudStream providers contain Kotlin <code>loadLinks()</code> logic, but the static browser app cannot execute Android/Kotlin plugins. The web player therefore does not scrape or resolve third-party movie pages; it plays direct media that you are authorized to relay through <code>ALLOWED_STREAM_HOSTS</code>. This keeps the optional URL box while using the real provider/source metadata already present in the project.</div>';
+ document.querySelectorAll("[data-close-stream]").forEach(el=>el.addEventListener("click",closeStreaming));
+ $("#loadMedia").addEventListener("click",()=>playMedia($("#mediaInput").value));
+ $("#streamModal").hidden=false;document.body.classList.add("modal-open");setTimeout(()=>$("#mediaInput")?.focus(),0);
 }
-
+function playMedia(value){
+ const media=directMediaUrl(value),input=$("#mediaInput"),shell=$("#playerShell"),status=$("#playerStatus");
+ if(!media){input.classList.add("input-error");status.textContent="Enter a valid http(s) MP4 or HLS URL.";input.focus();return;}
+ input.classList.remove("input-error");
+ const gateway="/api/stream?url="+encodeURIComponent(media),isHls=/\.m3u8(?:$|[?#])/i.test(media);
+ shell.innerHTML='<video class="player-frame native-player" id="nativePlayer" controls playsinline preload="metadata" crossorigin="anonymous"></video><div class="player-error" hidden></div>';
+ const video=$("#nativePlayer"),err=msg=>{const e=shell.querySelector(".player-error");e.hidden=false;e.textContent=msg;status.textContent=msg;};
+ status.textContent=isHls?"Loading HLS through the authorized gateway…":"Loading MP4 through the authorized gateway…";
+ if(isHls&&window.Hls&&Hls.isSupported()){const hls=new Hls({enableWorker:true});video.__hls=hls;hls.loadSource(gateway);hls.attachMedia(video);hls.on(Hls.Events.MANIFEST_PARSED,()=>{status.textContent="HLS ready — press Play.";video.play().catch(()=>{});});hls.on(Hls.Events.ERROR,(_,data)=>{if(data?.fatal){try{hls.destroy()}catch{};err("HLS playback failed. Verify the allowlisted host and media manifest.");}});}
+ else if(isHls&&video.canPlayType("application/vnd.apple.mpegurl")){video.src=gateway;video.addEventListener("loadedmetadata",()=>{status.textContent="HLS ready — press Play.";video.play().catch(()=>{});});}
+ else{video.src=gateway;video.addEventListener("loadedmetadata",()=>{status.textContent="MP4 ready — press Play.";});}
+ video.addEventListener("error",()=>err("Playback failed. Verify that the URL is a direct MP4/HLS source and its host is configured in ALLOWED_STREAM_HOSTS."));
+}
+function showProviderDetails(name){
+ ensureModal();const d=PROVIDER_DETAILS[name]||{};
+ $("#streamTitle").textContent=name+" · Source Details";$("#streamSubtitle").textContent="Repository-derived provider/source information.";
+ const site=d.site?'<a class="btn ghost" href="'+esc(d.site)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':"";
+ $("#streamBody").innerHTML='<div class="info-panel source-detail-panel"><div class="info-icon">MC</div><h3>'+esc(d.label||name)+'</h3><p class="detail-lead">'+esc(d.note||"Provider metadata is defined in the MovieCloud repository.")+'</p><div class="detail-grid"><div><span>Engine</span><b>'+esc(d.engine||"CloudStream")+'</b></div><div><span>Media</span><b>'+esc(d.media||"Direct media")+'</b></div><div><span>Source file</span><code>'+esc(d.source||"")+'</code></div></div><ul class="capability-list centered">'+(d.capabilities||[]).map(x=>'<li>'+esc(x)+'</li>').join("")+'</ul><div class="info-actions">'+site+'<button class="btn primary" type="button" data-open-media>Open Media Player</button><button class="btn ghost" type="button" data-close-stream>Close</button></div></div>';
+ $("#streamBody").querySelector("[data-open-media]").addEventListener("click",()=>openStreaming(name));$("#streamBody").querySelector("[data-close-stream]").addEventListener("click",closeStreaming);$("#streamModal").hidden=false;document.body.classList.add("modal-open");
+}
 function closeStreaming(){
- const modal=$("#streamModal");if(!modal)return;
- modal.hidden=true;document.body.classList.remove("modal-open");
- const frame=$("#providerFrame");if(frame)frame.src="about:blank";
+ const modal=$("#streamModal");if(!modal)return;const video=$("#nativePlayer");if(video?.__hls){try{video.__hls.destroy()}catch{}}if(video){try{video.pause();video.removeAttribute("src");video.load()}catch{}}modal.hidden=true;document.body.classList.remove("modal-open");
 }
 
 async function loadArtifacts(){

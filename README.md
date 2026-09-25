@@ -350,3 +350,22 @@ If you find MovieCloud useful, you can support the project by:
 ### Created & maintained by **Humayun Shariar Himu**
 ### হুমায়ূন সাহরিয়ার হিমু
 
+
+
+## Web App & Media Player
+
+The root web app is a responsive, iframe-free MovieCloud workspace. It reads the generated CloudStream artifact index, exposes repository-derived provider/source details, and provides a native media player for direct MP4/HLS URLs.
+
+### Provider/source model
+
+Provider cards are backed by the Kotlin provider source files in this repository. The web UI surfaces their known engine, media type, capabilities and source path. The Android/CloudStream .cs3 plugins themselves are not executable JavaScript, so the browser does not silently reimplement their third-party extraction logic.
+
+### Authorized media gateway
+
+Set ALLOWED_STREAM_HOSTS=media.example.com,cdn.example.com in Vercel. Only explicitly allowlisted HTTP(S) hosts are relayed. The gateway forwards Range/If-Range headers, preserves partial-response status/headers, follows redirects only when every redirect target remains allowlisted, and forwards request cancellation. Use it only for media you own or are authorized to relay.
+
+The direct Media URL field is intentionally optional. It is the bridge for an authorized direct .mp4 or .m3u8 source when a provider's CloudStream extractor has already produced a playable URL.
+
+### Browser HLS
+
+The frontend uses HLS.js when available and falls back to native HLS support. HLS playback still requires the allowlisted source to expose CORS-compatible media responses.
