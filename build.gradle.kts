@@ -7,7 +7,7 @@ buildscript {
  repositories { google(); mavenCentral(); gradlePluginPortal(); maven("https://jitpack.io") }
  dependencies {
   classpath("com.android.tools.build:gradle:8.7.3")
-  classpath("com.github.recloudstream:gradle:32895aedb6366f5075cb99bbd2e6ce0a7cac325d")
+  classpath("com.github.recloudstream:gradle:-SNAPSHOT")
   classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
  }
 }
@@ -31,7 +31,7 @@ subprojects {
   cloudstream("com.lagradost:cloudstream3:pre-release")
   implementation(kotlin("stdlib"))
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-  implementation("com.github.Blatzar:NiceHttp:f1dee9dfc5b86a24c65bf8c6e8403d336341dd3e")
+  implementation("com.github.Blatzar:NiceHttp:0.4.11")
   implementation("org.jsoup:jsoup:1.18.3")
   implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1")
   implementation("com.github.teamnewpipe:NewPipeExtractor:v0.25.2")
