@@ -24,7 +24,7 @@ cloudstream {
         "Anime"
     )
     language = "bn"
-    iconUrl = "https://i.postimg.cc/QMxBDF9T/favicon-V2.png"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/CTGFTP/icon.svg"
     isCrossPlatform = true
 }
 
