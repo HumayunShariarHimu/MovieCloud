@@ -38,7 +38,7 @@ function card(p){
    '<div class="card-head">'+iconFor(p.name)+'<div><h3>'+esc(p.name)+'</h3><span class="tag">CloudStream provider</span></div></div>'+
    '<p class="card-desc">'+esc(p.desc)+'</p><div class="actions">'+
    (cs3?'<a class="cs3" href="'+cs3+'" target="_blank" rel="noopener noreferrer">CS3 ↗</a>':'<span class="disabled">'+(artifactState==="unavailable"?"CS3 unavailable":"CS3 missing")+'</span>')+
-   (jar?'<a href="'+jar+'" target="_blank" rel="noopener noreferrer">JAR ↗</a>':'<span class="disabled" title="CloudStream installs the CS3 package directly">CS3 is the install package</span>')+
+   (jar?'<a class="jar-action" href="'+jar+'" target="_blank" rel="noopener noreferrer">JAR ↗</a>':'<span class="disabled jar-action" role="status" aria-label="JAR unavailable" title="This build publishes the CloudStream CS3 package; no separate JAR artifact is published.">JAR</span>')+
    '<a href="'+source+'" target="_blank" rel="noopener noreferrer">Source ↗</a>'+
    '</div></article>';
 }
