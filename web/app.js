@@ -47,6 +47,7 @@ const providers=[
 
 const $=s=>document.querySelector(s);
 let artifacts={providers:{}};
+let mediaCatalog={providers:{}};
 let artifactState="loading";
 
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
@@ -118,14 +119,19 @@ function directMediaUrl(value){
 function openStreaming(name){
  ensureModal();
  const detail=PROVIDER_DETAILS[name]||{};
+ const catalog=mediaCatalog.providers?.[name]||{};
+ const sources=Array.isArray(catalog.sources)?catalog.sources.filter(x=>directMediaUrl(x?.url)):[];
  $("#streamTitle").textContent=name+" · Media Player";
- $("#streamSubtitle").textContent="Native video playback workspace — no provider iframe.";
+ $("#streamSubtitle").textContent="Repository-aware native media workspace — no provider webpage iframe.";
  const site=detail.site?'<a class="btn ghost" href="'+esc(detail.site)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':"";
  const caps=(detail.capabilities||[]).map(x=>'<li>'+esc(x)+'</li>').join("");
- $("#streamBody").innerHTML='<div class="stream-layout"><aside class="source-panel"><div class="section-kicker">PROVIDER SOURCE MAP</div><h3>'+esc(detail.label||name)+'</h3><p class="source-engine">'+esc(detail.engine||"CloudStream provider")+'</p><div class="source-meta"><span>Media</span><b>'+esc(detail.media||"Direct media")+'</b></div><ul class="capability-list">'+caps+'</ul><div class="source-path"><span>Repository source</span><code>'+esc(detail.source||"")+'</code></div><p class="source-note">'+esc(detail.note||"Use an authorized direct media URL for browser playback.")+'</p><div class="info-actions">'+site+'<button class="btn primary" type="button" data-close-stream>Close</button></div></aside><section class="player-panel"><div class="tool-card"><label for="mediaInput">Authorized direct media URL <span>(optional)</span></label><div class="inline-form"><input id="mediaInput" type="url" inputmode="url" autocomplete="off" placeholder="https://your-domain.example/video.m3u8 or .mp4"><button id="loadMedia" class="btn primary" type="button">Play</button></div><div class="quick-links"><span>MP4 and HLS are supported when the source is authorized and allowlisted.</span></div></div><div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Enter a direct media URL to start playback.</p></div></div><div class="player-status" id="playerStatus" role="status">Ready — media URL is optional until you have a direct playable source.</div></section></div><div class="browser-note"><b>Architecture:</b> the repository CloudStream providers contain Kotlin <code>loadLinks()</code> logic, but the static browser app cannot execute Android/Kotlin plugins. The web player therefore does not scrape or resolve third-party movie pages; it plays direct media that you are authorized to relay through <code>ALLOWED_STREAM_HOSTS</code>. This keeps the optional URL box while using the real provider/source metadata already present in the project.</div>';
+ const auto=sources.length?'<div class="source-list"><div class="source-list-head"><b>Automatic repository sources</b><span>'+sources.length+' ready</span></div>'+sources.map((x,i)=>'<button class="playlist-item" type="button" data-auto-source="'+i+'"><span class="playlist-thumb">▶</span><span class="playlist-copy"><b>'+esc(x.label||("Repository source "+(i+1)))+'</b><small>'+esc(x.type||"Direct media")+'</small></span><span class="playlist-play">Play</span></button>').join("")+'</div>':'<div class="auto-empty"><b>Automatic source slot is ready.</b><p>No direct media URL is declared in the web-safe repository catalog for this provider. The Kotlin/CS3 provider remains available to CloudStream, but the browser cannot execute that Android plugin.</p></div>';
+ $("#streamBody").innerHTML='<div class="stream-layout"><aside class="source-panel"><div class="section-kicker">REPOSITORY SOURCE MAP</div><h3>'+esc(detail.label||name)+'</h3><p class="source-engine">'+esc(detail.engine||"CloudStream provider")+'</p><div class="source-meta"><span>Media</span><b>'+esc(detail.media||"Direct media")+'</b></div><ul class="capability-list">'+caps+'</ul><div class="source-path"><span>Repository source</span><code>'+esc(detail.source||"")+'</code></div><p class="source-note">'+esc(detail.note||"Use an authorized direct media URL for browser playback.")+'</p><div class="info-actions">'+site+'<button class="btn primary" type="button" data-close-stream>Close</button></div></aside><section class="player-panel">'+auto+'<div class="tool-card"><label for="mediaInput">Authorized direct media URL <span>(optional)</span></label><div class="inline-form"><input id="mediaInput" type="url" inputmode="url" autocomplete="off" placeholder="https://your-domain.example/video.m3u8 or .mp4"><button id="loadMedia" class="btn primary" type="button">Play</button></div><div class="quick-links"><span>MP4/HLS sources work when they are authorized and their hosts are allowlisted.</span></div></div><div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Choose an automatic repository source or enter a direct media URL.</p></div></div><div class="player-status" id="playerStatus" role="status">Ready.</div></section></div><div class="browser-note"><b>Important:</b> CloudStream <code>.cs3</code> files are Android/CloudStream plugins, not browser JavaScript. The web app can automatically play only direct media URLs explicitly declared in the repository's web-safe catalog; it does not scrape third-party provider pages or bypass their playback controls.</div>';
  document.querySelectorAll("[data-close-stream]").forEach(el=>el.addEventListener("click",closeStreaming));
+ document.querySelectorAll("[data-auto-source]").forEach(el=>el.addEventListener("click",()=>playMedia(sources[Number(el.dataset.autoSource)].url,sources[Number(el.dataset.autoSource)].label)));
  $("#loadMedia").addEventListener("click",()=>playMedia($("#mediaInput").value));
- $("#streamModal").hidden=false;document.body.classList.add("modal-open");setTimeout(()=>$("#mediaInput")?.focus(),0);
+ $("#streamModal").hidden=false;document.body.classList.add("modal-open");
+ if(sources.length===1)setTimeout(()=>playMedia(sources[0].url,sources[0].label),60);
 }
 function playMedia(value){
  const media=directMediaUrl(value),input=$("#mediaInput"),shell=$("#playerShell"),status=$("#playerStatus");
@@ -153,6 +159,7 @@ function closeStreaming(){
 
 async function loadArtifacts(){
  artifactState="loading";render();
+ try{const mr=await fetch("/web/media-catalog.json",{cache:"no-store"});if(mr.ok){const md=await mr.json();if(md&&typeof md.providers==="object")mediaCatalog=md;}}catch{mediaCatalog={providers:{}}}
  try{
    const r=await fetch(INDEX,{cache:"no-store"});if(!r.ok)throw new Error();
    const data=await r.json();if(!data||typeof data.providers!=="object")throw new Error();
