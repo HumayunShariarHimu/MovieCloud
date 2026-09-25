@@ -32,7 +32,7 @@
       <div class="hero-copy">
         <div class="eyebrow"><span class="pulse"></span> MOVIE-FLICK · CLOUDSTREAM</div>
         <h1>One cloud.<br><span>15 movie providers.</span></h1>
-        <p>MovieCloud brings the Movie-Flick provider collection into one fast, mobile-first streaming and CloudStream hub. Download provider packages, open icons, and keep every endpoint tied to your own repository.</p>
+        <p>MovieCloud brings the Movie-Flick provider collection into one fast, mobile-first streaming and CloudStream hub. Download provider packages, inspect repository source maps, and use the native player with repository-declared direct media, M3U/M3U8 playlists, or an authorized direct URL.</p>
         <div class="hero-actions">
           <a class="btn primary" href="#providers">Explore providers <span>↓</span></a>
           <a class="btn ghost" href="#install">How to install</a>
@@ -77,9 +77,9 @@
         <ol>
           <li>Open a provider card and choose <b>CS3</b> for the CloudStream plugin package, or choose <b>Media Player</b> to open that provider’s source map and player.</li>
           <li>The <b>JAR</b> control is functional: when no real JAR exists it opens the artifact explanation instead of acting like a dead link.</li>
-          <li>Use <b>Media Player</b> with an authorized direct MP4/HLS source. The provider source map remains visible beside the player.</li>
+          <li>Use <b>Media Player</b> for repository-declared direct sources, an optional <b>M3U/M3U8 playlist URL</b>, or an authorized direct MP4/HLS source. The provider source map remains visible beside the player.</li>
         </ol>
-        <p class="note">CloudStream uses the published <b>CS3</b> package. The streaming workspace below each provider uses repository-derived source details and an optional direct-media player; provider pages are never loaded in an iframe.</p>
+        <p class="note">CloudStream uses the published <b>CS3</b> package. The streaming workspace below each provider uses repository-derived source details, repository-declared automatic sources when available, optional M3U/M3U8 playlists, and an authorized direct-media player; provider pages are never loaded in an iframe.</p>
       </div>
       <div class="install-code">
         <div class="code-head"><span>ARTIFACT ROOT</span><button id="copyRoot">Copy</button></div>
@@ -94,7 +94,7 @@
         <div class="section-kicker">ABOUT MOVIECLOUD</div>
         <h2>Your Movie-Flick collection + streaming workspace.</h2>
       </div>
-      <p>The web app is a lightweight static frontend: no framework, no backend, no tracking dependency. Provider metadata, artifact links, streaming endpoints and icons are defined in JavaScript. The UI validates artifacts in the browser and provides a per-provider streaming workspace with search/watch tools where supported.</p>
+      <p>The web app is a lightweight static frontend with a small Vercel media gateway. Provider metadata, artifact links, source maps and icons are defined in JavaScript. The UI validates artifacts and provides a responsive per-provider streaming workspace.</p>
     </section>
   </main>
 
