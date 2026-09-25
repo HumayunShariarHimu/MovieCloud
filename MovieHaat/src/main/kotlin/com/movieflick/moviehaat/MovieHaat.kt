@@ -997,3 +997,525 @@ class MovieHaat : MainAPI() {
                 else ->
                     ExtractorLinkType.VIDEO
             }
+        callback(
+            newExtractorLink(
+                source = name,
+                name = "Movie Haat Direct",
+                url = clean,
+                type = type
+            ) {
+                quality =
+                    detectQuality(lowered)
+            }
+        )
+    }
+
+    private fun detectQuality(
+        value: String
+    ): Int {
+        return when {
+            Regex("""(?i)\b2160p\b|\b4k\b""").containsMatchIn(value) ->
+                Qualities.P2160.value
+
+            Regex("""(?i)\b1440p\b""").containsMatchIn(value) ->
+                Qualities.P1440.value
+
+            Regex("""(?i)\b1080p\b""").containsMatchIn(value) ->
+                Qualities.P1080.value
+
+            Regex("""(?i)\b720p\b""").containsMatchIn(value) ->
+                Qualities.P720.value
+
+            Regex("""(?i)\b480p\b""").containsMatchIn(value) ->
+                Qualities.P480.value
+
+            Regex("""(?i)\b360p\b""").containsMatchIn(value) ->
+                Qualities.P360.value
+
+            else ->
+                Qualities.Unknown.value
+        }
+    }
+
+    private fun posterFromNode(
+        node: JsonNode
+    ): String? {
+        val raw =
+            node.textOrNull("image_path")
+                ?: node.textOrNull("image")
+                ?: node.textOrNull("images")
+                ?: node.textOrNull("poster")
+                ?: node.textOrNull("poster_path")
+                ?: return null
+
+        if (raw.isBlank()) return null
+
+        return absoluteUrl(
+            raw,
+            MEDIA_BASE
+        )
+    }
+
+    private fun mediaUrl(
+        raw: String
+    ): String {
+        val value = raw.trim()
+
+        if (value.isBlank()) return value
+
+        if (
+            value.startsWith("http://", true) ||
+            value.startsWith("https://", true)
+        ) {
+            return value
+        }
+
+        return absoluteUrl(
+            value,
+            MEDIA_BASE
+        )
+    }
+
+    private fun absoluteUrl(
+        value: String,
+        base: String
+    ): String {
+        return try {
+            URI(base).resolve(
+                if (
+                    value.startsWith("/")
+                ) {
+                    value
+                } else {
+                    "/$value"
+                }
+            ).toString()
+        } catch (_: Exception) {
+            value
+        }
+    }
+
+    private fun urlPath(
+        value: String
+    ): String =
+        URLEncoder.encode(
+            value,
+            Charsets.UTF_8.name()
+        )
+
+    private fun looksLikeDirectMedia(
+        value: String
+    ): Boolean {
+        val lower =
+            value
+                .substringBefore("?")
+                .lowercase(Locale.ROOT)
+
+        return lower.endsWith(".mp4") ||
+            lower.endsWith(".mkv") ||
+            lower.endsWith(".webm") ||
+            lower.endsWith(".m4v") ||
+            lower.endsWith(".mov") ||
+            lower.endsWith(".avi") ||
+            lower.endsWith(".flv") ||
+            lower.endsWith(".ts") ||
+            lower.endsWith(".m3u8") ||
+            lower.endsWith(".mpd")
+    }
+
+    private fun titleFromUrl(
+        value: String
+    ): String {
+        val name =
+            value
+                .substringBefore("?")
+                .substringAfterLast("/")
+                .substringBeforeLast(".")
+
+        return cleanTitle(name)
+            .ifBlank { "Movie Haat" }
+    }
+
+    private fun cleanTitle(
+        value: String
+    ): String {
+        return value
+            .replace(Regex("""[_]+"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    private fun normalizeSearch(
+        value: String
+    ): String {
+        return java.text.Normalizer
+            .normalize(
+                value,
+                java.text.Normalizer.Form.NFKC
+            )
+            .lowercase(Locale.ROOT)
+            .replace("&", " and ")
+            .replace(
+                Regex("""[^a-z0-9\p{L}]+"""),
+                " "
+            )
+            .replace(
+                Regex("""\s+"""),
+                " "
+            )
+            .trim()
+    }
+
+    private fun compactSearch(
+        value: String
+    ): String =
+        normalizeSearch(value)
+            .replace(" ", "")
+
+    private fun searchScore(
+        query: String,
+        title: String
+    ): Int {
+        val q =
+            normalizeSearch(query)
+
+        val t =
+            normalizeSearch(title)
+
+        if (q.isBlank() || t.isBlank()) {
+            return 0
+        }
+
+        if (q == t) return 1000
+
+        val qc =
+            compactSearch(query)
+
+        val tc =
+            compactSearch(title)
+
+        if (
+            qc.isNotBlank() &&
+            qc == tc
+        ) {
+            return 980
+        }
+
+        if (t.contains(q)) return 930
+        if (tc.contains(qc)) return 860
+
+        val qTokens =
+            q.split(' ')
+                .filter { it.length >= 2 }
+
+        val tTokens =
+            t.split(' ')
+                .filter { it.length >= 2 }
+
+        if (
+            qTokens.isNotEmpty() &&
+            tTokens.isNotEmpty()
+        ) {
+            var score = 0
+
+            qTokens.forEach { qt ->
+                val best =
+                    tTokens.maxOfOrNull { tt ->
+                        when {
+                            tt == qt -> 900
+                            tt.startsWith(qt) ||
+                                qt.startsWith(tt) -> 750
+                            else -> similarity(qt, tt)
+                        }
+                    } ?: 0
+
+                score += best
+            }
+
+            return score / qTokens.size
+        }
+
+        return similarity(qc, tc)
+    }
+
+    private fun similarity(
+        a: String,
+        b: String
+    ): Int {
+        if (a == b) return 700
+        if (a.isBlank() || b.isBlank()) return 0
+
+        val distance =
+            levenshtein(
+                a,
+                b
+            )
+
+        val maxLen =
+            maxOf(
+                a.length,
+                b.length
+            )
+
+        if (maxLen == 0) return 0
+
+        return (
+            650 -
+                (
+                    distance.toDouble() /
+                        maxLen.toDouble() *
+                        650.0
+                    ).toInt()
+            ).coerceAtLeast(0)
+    }
+
+    private fun levenshtein(
+        a: String,
+        b: String
+    ): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+
+        var previous =
+            IntArray(
+                b.length + 1
+            ) { it }
+
+        var current =
+            IntArray(
+                b.length + 1
+            )
+
+        for (i in a.indices) {
+            current[0] = i + 1
+
+            for (j in b.indices) {
+                val cost =
+                    if (a[i] == b[j]) {
+                        0
+                    } else {
+                        1
+                    }
+
+                current[j + 1] =
+                    minOf(
+                        current[j] + 1,
+                        previous[j + 1] + 1,
+                        previous[j] + cost
+                    )
+            }
+
+            val swap = previous
+            previous = current
+            current = swap
+        }
+
+        return previous[b.length]
+    }
+
+    private fun homeDedupKey(
+        item: HomeItem
+    ): String =
+        (
+            if (item.isSeries) {
+                "tv:"
+            } else {
+                "movie:"
+            }
+        ) +
+            item.id.lowercase(Locale.ROOT)
+
+    private fun parseJson(
+        text: String
+    ): JsonNode? {
+        if (text.isBlank()) return null
+
+        return runCatching {
+            objectMapper.readTree(
+                text
+            )
+        }.getOrNull()
+    }
+
+    private fun arrayFrom(
+        root: JsonNode?,
+        vararg paths: String
+    ): List<JsonNode> {
+        if (root == null) return emptyList()
+
+        if (root.isArray) {
+            return root.toList()
+        }
+
+        val direct = root.path("data")
+
+        if (direct.isArray) {
+            return direct.toList()
+        }
+
+        if (direct.isObject) {
+            for (path in paths) {
+                val nested = direct.path(path)
+                if (nested.isArray) {
+                    return nested.toList()
+                }
+            }
+
+            val results = direct.path("results")
+            if (results.isArray) {
+                return results.toList()
+            }
+        }
+
+        for (path in paths) {
+            val node = root.path(path)
+            if (node.isArray) {
+                return node.toList()
+            }
+        }
+
+        return emptyList()
+    }
+
+    private fun firstObjectFrom(
+        root: JsonNode?,
+        key: String
+    ): JsonNode? {
+        if (root == null) return null
+
+        val node =
+            root.path(key)
+
+        return when {
+            node.isArray ->
+                node.firstOrNull()
+
+            node.isObject ->
+                node
+
+            root.path("data").isArray ->
+                root.path("data").firstOrNull()
+
+            root.path("data").isObject &&
+                root.path("data").path(key).isArray ->
+                root.path("data").path(key).firstOrNull()
+
+            else ->
+                null
+        }
+    }
+
+    private fun JsonNode.textOrNull(
+        field: String
+    ): String? {
+        val value =
+            path(field)
+
+        if (
+            value.isMissingNode ||
+            value.isNull
+        ) {
+            return null
+        }
+
+        val text =
+            value.asText().trim()
+
+        return text.takeIf {
+            it.isNotBlank() &&
+                !it.equals(
+                    "null",
+                    ignoreCase = true
+                )
+        }
+    }
+
+    private fun firstText(
+        node: JsonNode,
+        vararg fields: String
+    ): String? =
+        fields.firstNotNullOfOrNull {
+            node.textOrNull(it)
+        }
+
+    private fun firstInt(
+        node: JsonNode,
+        vararg fields: String
+    ): Int? {
+        for (field in fields) {
+            val value =
+                node.path(field)
+
+            if (
+                value.isInt ||
+                value.isLong ||
+                value.isNumber
+            ) {
+                return value.asInt()
+            }
+
+            value
+                .asText(
+                    ""
+                )
+                .trim()
+                .toIntOrNull()
+                ?.let {
+                    return it
+                }
+        }
+
+        return null
+    }
+
+    private fun parseTimestamp(
+        value: String?
+    ): Long? {
+        if (value.isNullOrBlank()) return null
+
+        value
+            .toLongOrNull()
+            ?.let {
+                return if (
+                    it < 10_000_000_000L
+                ) {
+                    it * 1000L
+                } else {
+                    it
+                }
+            }
+
+        val formats =
+            listOf(
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm",
+                "yyyy-MM-dd",
+                "dd-MM-yyyy HH:mm:ss",
+                "dd-MM-yyyy HH:mm",
+                "dd-MM-yyyy",
+                "dd/MM/yyyy HH:mm:ss",
+                "dd/MM/yyyy HH:mm",
+                "dd/MM/yyyy",
+                "MMM dd, yyyy HH:mm:ss",
+                "MMM dd, yyyy HH:mm",
+                "MMM dd, yyyy"
+            )
+
+        for (format in formats) {
+            val parsed =
+                runCatching {
+                    java.text.SimpleDateFormat(
+                        format,
+                        Locale.ENGLISH
+                    ).parse(value)?.time
+                }.getOrNull()
+
+            if (parsed != null) {
+                return parsed
+            }
+        }
+
+        return null
+    }
+}
