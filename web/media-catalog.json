@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "description": "MovieCloud web-safe media catalog. Only direct media URLs that the project owner is authorized to relay should be added here.",
+  "providers": {
+    "BasPlayFTP": {"sources":[]},
+    "CinePlexFTP": {"sources":[]},
+    "CTGFTP": {"sources":[]},
+    "DhakaFTP": {"sources":[]},
+    "DiscoveryFTP": {"sources":[]},
+    "HiAnime": {"sources":[]},
+    "KhulnaPlex": {"sources":[]},
+    "MojaLoss": {"sources":[]},
+    "MovieHaat": {"sources":[]},
+    "MovieLinkBD": {"sources":[]},
+    "OnlineMovies": {"sources":[]},
+    "YouTube": {"sources":[]},
+    "YouTubeKids": {"sources":[]},
+    "Zoryva": {"sources":[]},
+    "MovieBox": {"sources":[]}
+  }
+}
