@@ -997,4 +997,1474 @@ class HiAnime : MainAPI() {
                     referer = seriesUrl
                 )
 
+            /*             * If the AJAX endpoint is unavailable, the page may already
+             * contain an episode fragment (for example after an internal
+             * server-side render). Use only real anchors from that fragment.
+             */
+            if (episodes.isEmpty()) {
+                episodes = parseEpisodeItems(
+                    html = document
+                        .selectFirst("#episodes-content")
+                        ?.html()
+                        .orEmpty(),
+                    seasonNumber = seasonNumber
+                )
+            }
+
             /*
+             * Never invent Episode 1. If there is no authoritative episode
+             * record we still know this is a TV page, so keep the correct
+             * TvSeries type instead of turning it into a Movie.
+             */
+            return newTvSeriesLoadResponse(
+                title,
+                seriesUrl,
+                TvType.TvSeries,
+                episodes
+            ) {
+                posterUrl = poster
+                this.plot = plot
+                this.year = year
+            }
+        }
+
+        /*
+         * Normal non-TV content.
+         */
+        val pageType =
+            if (
+                forcedMovie ||
+                document
+                    .selectFirst(".film-stats")
+                    ?.text()
+                    ?.contains("MOVIE", true) == true ||
+                canonical.lowercase(Locale.ROOT)
+                    .contains("/movie/")
+            ) {
+                TvType.Movie
+            } else {
+                TvType.Anime
+            }
+
+        /*
+         * IMPORTANT:
+         * Keep the original watch URL (including ?ep=...) as the playback data.
+         * Movie pages on HiAnime are backed by an internal episode/source id even
+         * though the CloudStream UI must remain a Movie. Dropping ?ep=... here
+         * makes loadLinks() lose the exact playable source id.
+         */
+        return newMovieLoadResponse(
+            title,
+            canonical,
+            pageType,
+            rawPageUrl
+        ) {
+            posterUrl = poster
+            this.plot = plot
+            this.year = year
+        }
+    }
+
+    private fun extractYear(
+        document: Document
+    ): Int? {
+        val text = buildString {
+            append(' ')
+            append(
+                document.selectFirst(".anisc-detail")
+                    ?.text()
+                    .orEmpty()
+            )
+            append(' ')
+            append(
+                document.selectFirst(".film-stats")
+                    ?.text()
+                    .orEmpty()
+            )
+            append(' ')
+            append(
+                document
+                    .selectFirst(
+                        "meta[property=og:description]"
+                    )
+                    ?.attr("content")
+                    .orEmpty()
+            )
+        }
+
+        return Regex("""\b(19\d{2}|20\d{2})\b""")
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+    }
+
+    private data class ServerInfo(
+        val id: String,
+        val name: String,
+        val type: String,
+        val serverId: String? = null
+    )
+
+    private fun parseServerHtml(
+        html: String
+    ): List<ServerInfo> {
+        if (html.isBlank()) return emptyList()
+
+        val document = Jsoup.parse(
+            html,
+            "$mainUrl/"
+        )
+
+        return document.select(
+            "div.server-item[data-id], " +
+                ".server-item[data-id], " +
+                "[data-id].server-item"
+        ).mapNotNull { item ->
+            val id = item.attr("data-id").trim()
+            if (id.isBlank()) return@mapNotNull null
+
+            val name = cleanText(
+                item.selectFirst(
+                    ".server-name, .server-item-name, .name"
+                )?.text()
+            ).ifBlank {
+                cleanText(item.text())
+            }.ifBlank {
+                "Server $id"
+            }
+
+            val type = item.attr("data-type")
+                .ifBlank {
+                    cleanText(
+                        item.parents()
+                            .firstOrNull {
+                                it.hasAttr("data-type")
+                            }
+                            ?.attr("data-type")
+                    )
+                }
+                .ifBlank {
+                    val value = cleanText(
+                        item.parent()?.text()
+                    ).lowercase(Locale.ROOT)
+
+                    when {
+                        value.contains("dub") -> "dub"
+                        value.contains("raw") -> "raw"
+                        else -> "sub"
+                    }
+                }
+
+            val providerServerId =
+                item.attr("data-server-id")
+                    .ifBlank {
+                        item.attr("data-server")
+                    }
+                    .ifBlank {
+                        item.attr("data-serverid")
+                    }
+                    .takeIf { it.isNotBlank() }
+
+            ServerInfo(
+                id = id,
+                name = name,
+                type = type,
+                serverId = providerServerId
+            )
+        }.distinctBy {
+            "${it.id}:${it.type}"
+        }
+    }
+
+    private fun parseServerJson(
+        raw: String
+    ): List<ServerInfo> {
+        val root = runCatching {
+            JSONObject(raw)
+        }.getOrNull() ?: return emptyList()
+
+        val result = linkedMapOf<String, ServerInfo>()
+
+        fun walk(value: Any?, inheritedType: String? = null) {
+            when (value) {
+                is JSONObject -> {
+                    val rawId = value.optString(
+                        "id"
+                    ).trim()
+
+                    val rawServerId = value.optString(
+                        "serverId",
+                        value.optString("server_id")
+                    ).trim()
+
+                    val id = rawId
+                        .ifBlank { rawServerId }
+
+                    val providerServerId =
+                        rawServerId
+                            .takeIf { it.isNotBlank() }
+                            ?.takeUnless { it == rawId }
+
+                    val name = cleanText(
+                        value.optString(
+                            "name",
+                            value.optString(
+                                "serverName",
+                                ""
+                            )
+                        )
+                    )
+
+                    val type = cleanText(
+                        value.optString(
+                            "type",
+                            value.optString(
+                                "category",
+                                inheritedType.orEmpty()
+                            )
+                        )
+                    ).ifBlank {
+                        inheritedType ?: "sub"
+                    }
+
+                    if (
+                        id.isNotBlank() &&
+                        (
+                            name.isNotBlank() ||
+                                value.has("serverId") ||
+                                value.has("server_id")
+                            )
+                    ) {
+                        val key = "$id:$type"
+                        result[key] = ServerInfo(
+                            id = id,
+                            name = name.ifBlank { "Server $id" },
+                            type = type,
+                            serverId = providerServerId
+                        )
+                    }
+
+                    val keys = value.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val child = value.opt(key)
+
+                        val childType =
+                            when {
+                                key.equals("dub", true) -> "dub"
+                                key.equals("raw", true) -> "raw"
+                                key.equals("sub", true) -> "sub"
+                                key.equals("mixed", true) -> "mixed"
+                                else -> inheritedType
+                            }
+
+                        walk(
+                            child,
+                            childType
+                        )
+                    }
+                }
+
+                is org.json.JSONArray -> {
+                    for (i in 0 until value.length()) {
+                        walk(
+                            value.opt(i),
+                            inheritedType
+                        )
+                    }
+                }
+            }
+        }
+
+        walk(root)
+
+        return result.values.toList()
+    }
+
+
+    private fun captureSetCookies(
+        headers: Headers,
+        cookieJar: MutableMap<String, String>
+    ) {
+        headers.values("Set-Cookie").forEach { raw ->
+            val pair = raw.substringBefore(';').trim()
+            val index = pair.indexOf('=')
+            if (index <= 0) return@forEach
+
+            val name = pair.substring(0, index).trim()
+            val value = pair.substring(index + 1).trim()
+
+            if (name.isNotBlank() && value.isNotBlank()) {
+                cookieJar[name] = value
+            }
+        }
+    }
+
+    private fun cookieHeader(
+        cookieJar: Map<String, String>
+    ): String =
+        cookieJar.entries
+            .filter { it.key.isNotBlank() && it.value.isNotBlank() }
+            .joinToString("; ") {
+                "${it.key}=${it.value}"
+            }
+
+    private fun csrfTokenFromCookies(
+        cookieJar: Map<String, String>
+    ): String? =
+        cookieJar["XSRF-TOKEN"]
+            ?.let {
+                runCatching {
+                    URLDecoder.decode(
+                        it,
+                        StandardCharsets.UTF_8.name()
+                    )
+                }.getOrNull()
+            }
+            ?.takeIf { it.isNotBlank() }
+
+    private fun sessionHeaders(
+        referer: String,
+        cookieJar: Map<String, String>
+    ): Map<String, String> {
+        val result = pageHeaders.toMutableMap()
+
+        result["Accept"] =
+            "application/json, text/javascript, */*; q=0.01"
+        result["Referer"] = referer
+        result["Origin"] = mainUrl
+        result["X-Requested-With"] = "XMLHttpRequest"
+
+        val cookie = cookieHeader(cookieJar)
+        if (cookie.isNotBlank()) {
+            result["Cookie"] = cookie
+        }
+
+        csrfTokenFromCookies(cookieJar)?.let {
+            result["X-XSRF-TOKEN"] = it
+        }
+
+        return result
+    }
+
+    private suspend fun createFreshSession(
+        pageUrl: String
+    ): MutableMap<String, String> {
+        val cookieJar = linkedMapOf<String, String>()
+
+        /*
+         * The current site explicitly reads XSRF-TOKEN from document.cookie
+         * and sends it as X-XSRF-TOKEN on AJAX requests. Bootstrap both the
+         * normal page and auth/state so the same cookie flow is reproduced.
+         */
+        val bootstrap = listOf(
+            pageUrl,
+            "$mainUrl/api/theme/auth/state"
+        )
+
+        for (url in bootstrap) {
+            val response = runCatching {
+                app.get(
+                    url,
+                    headers = pageHeaders + mapOf(
+                        "Referer" to
+                            if (url == pageUrl) "$mainUrl/" else pageUrl
+                    )
+                )
+            }.getOrNull() ?: continue
+
+            captureSetCookies(
+                response.headers,
+                cookieJar
+            )
+        }
+
+        return cookieJar
+    }
+
+    private suspend fun getEpisodeServers(
+        episodeId: String,
+        referer: String,
+        cookieJar: MutableMap<String, String> = linkedMapOf()
+    ): List<ServerInfo> {
+        val endpoints = listOf(
+            "$mainUrl/api/theme/episode/servers?episodeId=$episodeId",
+            "$mainUrl/ajax/v2/episode/servers?episodeId=$episodeId"
+        ).distinct()
+
+        for (url in endpoints) {
+            val response = runCatching {
+                app.get(
+                    url,
+                    headers = sessionHeaders(
+                        referer = referer,
+                        cookieJar = cookieJar
+                    )
+                )
+            }.getOrNull() ?: continue
+
+            captureSetCookies(
+                response.headers,
+                cookieJar
+            )
+
+            val raw = response.text.trim()
+            if (raw.isBlank()) continue
+
+            val jsonServers = parseServerJson(raw)
+
+            if (jsonServers.isNotEmpty()) {
+                return jsonServers
+            }
+
+            val htmlServers = runCatching {
+                JSONObject(raw).optString("html")
+            }.getOrNull()
+                ?.let(::parseServerHtml)
+                .orEmpty()
+
+            if (htmlServers.isNotEmpty()) {
+                return htmlServers
+            }
+
+            val directHtml = parseServerHtml(raw)
+            if (directHtml.isNotEmpty()) {
+                return directHtml
+            }
+        }
+
+        return emptyList()
+    }
+
+    private fun collectMediaUrls(
+        value: Any?,
+        found: MutableSet<String>
+    ) {
+        when (value) {
+            is JSONObject -> {
+                val keys = value.keys()
+
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val child = value.opt(key)
+
+                    if (child is String) {
+                        val candidate = child.trim()
+                        if (isMediaUrl(candidate)) {
+                            found.add(candidate)
+                        }
+                    }
+
+                    collectMediaUrls(
+                        child,
+                        found
+                    )
+                }
+            }
+
+            is org.json.JSONArray -> {
+                for (i in 0 until value.length()) {
+                    collectMediaUrls(
+                        value.opt(i),
+                        found
+                    )
+                }
+            }
+        }
+    }
+
+    private fun directMediaFromJson(
+        raw: String
+    ): List<String> {
+        val json = runCatching {
+            JSONObject(raw)
+        }.getOrNull() ?: return emptyList()
+
+        val found = linkedSetOf<String>()
+
+        collectMediaUrls(
+            json,
+            found
+        )
+
+        /*
+         * Also accept raw JSON strings where escaping hides the URL.
+         */
+        val normalized = raw
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("&amp;", "&")
+
+        Regex(
+            """https?://[^"\\\s]+?\.(?:m3u8|mp4|mpd|webm|m4v|mov|mkv)(?:\?[^"\\\s]*)?"""
+        ).findAll(normalized).forEach {
+            found.add(it.value)
+        }
+
+        return found.toList()
+    }
+
+    private fun sourceLinkFromJson(
+        raw: String
+    ): List<String> {
+        val json = runCatching {
+            JSONObject(raw)
+        }.getOrNull() ?: return emptyList()
+
+        val result = linkedSetOf<String>()
+
+        fun walk(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val keys = value.keys()
+
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val child = value.opt(key)
+
+                        if (child is String) {
+                            val str = child.trim()
+
+                            if (
+                                key.equals("link", true) ||
+                                key.equals("url", true) ||
+                                key.equals("embed", true) ||
+                                key.equals("iframe", true) ||
+                                key.equals("source", true)
+                            ) {
+                                if (
+                                    str.startsWith("http://") ||
+                                    str.startsWith("https://")
+                                ) {
+                                    result.add(str)
+                                }
+                            }
+                        }
+
+                        walk(child)
+                    }
+                }
+
+                is org.json.JSONArray -> {
+                    for (i in 0 until value.length()) {
+                        walk(value.opt(i))
+                    }
+                }
+            }
+        }
+
+        walk(json)
+
+        return result.toList()
+    }
+
+
+    private fun decryptAesCbcCompat(
+        key: String,
+        encrypted: String
+    ): String? {
+        return runCatching {
+            val all = Base64.getDecoder().decode(encrypted)
+            if (all.size <= 16) return null
+
+            val salt = all.copyOfRange(0, 16)
+            val ciphertext = all.copyOfRange(16, all.size)
+
+            val derived = ArrayList<Byte>(48)
+            var previous = ByteArray(0)
+
+            while (derived.size < 48) {
+                val md5 = MessageDigest.getInstance("MD5")
+                md5.update(previous)
+                md5.update(
+                    key.toByteArray(
+                        StandardCharsets.UTF_8
+                    )
+                )
+                md5.update(salt)
+
+                previous = md5.digest()
+
+                previous.forEach {
+                    derived.add(it)
+                }
+            }
+
+            val aesKey = derived
+                .take(32)
+                .toByteArray()
+
+            val iv = derived
+                .drop(32)
+                .take(16)
+                .toByteArray()
+
+            val cipher = Cipher.getInstance(
+                "AES/CBC/PKCS5Padding"
+            )
+
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                SecretKeySpec(
+                    aesKey,
+                    "AES"
+                ),
+                IvParameterSpec(iv)
+            )
+
+            String(
+                cipher.doFinal(ciphertext),
+                StandardCharsets.UTF_8
+            )
+        }.getOrNull()
+    }
+
+    private suspend fun extractEncryptedSourcePayload(
+        raw: String
+    ): List<String> {
+        val json = runCatching {
+            JSONObject(raw)
+        }.getOrNull() ?: return emptyList()
+
+        val sources = json.opt("sources")
+            ?: json.optJSONObject("data")
+                ?.opt("sources")
+            ?: return emptyList()
+
+        if (sources is org.json.JSONArray) {
+            return buildList {
+                for (i in 0 until sources.length()) {
+                    val obj =
+                        sources.optJSONObject(i)
+                            ?: continue
+
+                    val file = obj.optString(
+                        "file",
+                        obj.optString("url")
+                    ).trim()
+
+                    if (isMediaUrl(file)) {
+                        add(file)
+                    }
+                }
+            }
+        }
+
+        if (sources is String && sources.isNotBlank()) {
+            /*
+             * The established HiAnime/Megacloud-compatible implementation
+             * uses an AES-CBC payload derived from MD5(key + salt). The current
+             * response can be resolved with a runtime key fetched from the
+             * public key source, with a known fallback.
+             */
+            val keys = linkedSetOf<String>()
+
+            runCatching {
+                val keyResponse = app.get(
+                    "https://raw.githubusercontent.com/yogesh-hacker/MegacloudKeys/refs/heads/main/keys.json",
+                    headers = mapOf(
+                        "Accept" to "application/json"
+                    )
+                )
+
+                val keyJson = JSONObject(
+                    keyResponse.text
+                )
+
+                keyJson.optString("mega")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { keys.add(it) }
+
+                keyJson.optString("vidplay")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { keys.add(it) }
+            }
+
+            keys.add(
+                "80830978219438573984724834823458"
+            )
+
+            for (key in keys) {
+                val decrypted =
+                    decryptAesCbcCompat(
+                        key = key,
+                        encrypted = sources
+                    ) ?: continue
+
+                val nested = runCatching {
+                    org.json.JSONArray(decrypted)
+                }.getOrNull()
+
+                if (nested != null) {
+                    val result = buildList {
+                        for (i in 0 until nested.length()) {
+                            val obj =
+                                nested.optJSONObject(i)
+                                    ?: continue
+
+                            val file = obj.optString(
+                                "file",
+                                obj.optString("url")
+                            ).trim()
+
+                            if (isMediaUrl(file)) {
+                                add(file)
+                            }
+                        }
+                    }
+
+                    if (result.isNotEmpty()) {
+                        return result
+                    }
+                }
+
+                val nestedObj = runCatching {
+                    JSONObject(decrypted)
+                }.getOrNull()
+
+                if (nestedObj != null) {
+                    val result = linkedSetOf<String>()
+
+                    collectMediaUrls(
+                        nestedObj,
+                        result
+                    )
+
+                    if (result.isNotEmpty()) {
+                        return result.toList()
+                    }
+                }
+            }
+        }
+
+        return emptyList()
+    }
+
+    private fun fallbackProviderServerIds(
+        server: ServerInfo
+    ): List<String> {
+        val result = linkedSetOf<String>()
+
+        server.serverId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { result.add(it) }
+
+        val normalized =
+            server.name
+                .lowercase(Locale.ROOT)
+                .replace(" ", "")
+                .replace("(", "")
+                .replace(")", "")
+
+        when {
+            normalized.contains("hd-1") ||
+                normalized.contains("hd1") ->
+                result.add("4")
+
+            normalized.contains("hd-2") ||
+                normalized.contains("hd2") ->
+                result.add("1")
+
+            normalized.contains("hd-3") ||
+                normalized.contains("hd3") ->
+                result.add("6")
+        }
+
+        return result.toList()
+    }
+
+    private suspend fun getMapperSources(
+        episodeId: String,
+        server: ServerInfo
+    ): List<String> {
+        /*
+         * Last-resort resolver. The mapper API exposes the same HiAnime
+         * episode -> server -> source relationship and returns a normalized
+         * HLS/MP4 URL. The first-party HiAnime endpoints remain preferred.
+         */
+        val ids = fallbackProviderServerIds(server)
+        if (ids.isEmpty()) return emptyList()
+
+        val encodedEpisode =
+            URLEncoder.encode(
+                episodeId,
+                StandardCharsets.UTF_8.name()
+            )
+
+        for (providerId in ids) {
+            val url =
+                "https://hianime-mapper.vercel.app/anime/sources" +
+                    "?serverId=$providerId" +
+                    "&episodeId=$encodedEpisode"
+
+            val response = runCatching {
+                app.get(
+                    url,
+                    headers = mapOf(
+                        "Accept" to "application/json"
+                    )
+                )
+            }.getOrNull() ?: continue
+
+            val raw = response.text.trim()
+            if (raw.isBlank()) continue
+
+            val found = linkedSetOf<String>()
+
+            runCatching {
+                val root = JSONObject(raw)
+                val data = root.optJSONObject("data")
+                    ?: root
+
+                val sourceArray =
+                    data.optJSONArray("sources")
+
+                if (sourceArray != null) {
+                    for (i in 0 until sourceArray.length()) {
+                        val obj =
+                            sourceArray.optJSONObject(i)
+                                ?: continue
+
+                        val urlValue = obj.optString(
+                            "url",
+                            obj.optString("file")
+                        ).trim()
+
+                        if (isMediaUrl(urlValue)) {
+                            found.add(urlValue)
+                        }
+                    }
+                }
+            }
+
+            if (found.isNotEmpty()) {
+                return found.toList()
+            }
+
+            directMediaFromJson(raw).forEach {
+                found.add(it)
+            }
+
+            if (found.isNotEmpty()) {
+                return found.toList()
+            }
+        }
+
+        return emptyList()
+    }
+
+    private suspend fun getEpisodeSources(
+        serverId: String,
+        episodeId: String,
+        referer: String,
+        cookieJar: MutableMap<String, String> = linkedMapOf()
+    ): List<String> {
+        val endpoints = listOf(
+            "$mainUrl/api/theme/episode/sources?serverId=$serverId&episodeId=$episodeId",
+            "$mainUrl/api/theme/episode/source?serverId=$serverId&episodeId=$episodeId",
+            "$mainUrl/api/theme/episode/sources?id=$serverId&episodeId=$episodeId",
+            "$mainUrl/ajax/v2/episode/sources?id=$serverId"
+        ).distinct()
+
+        for (url in endpoints) {
+            val response = runCatching {
+                app.get(
+                    url,
+                    headers = sessionHeaders(
+                        referer = referer,
+                        cookieJar = cookieJar
+                    )
+                )
+            }.getOrNull() ?: continue
+
+            captureSetCookies(
+                response.headers,
+                cookieJar
+            )
+
+            val raw = response.text.trim()
+            if (raw.isBlank()) continue
+
+            /*
+             * Direct sources[].file / sources[].url
+             */
+            val direct = directMediaFromJson(raw)
+            if (direct.isNotEmpty()) {
+                return direct
+            }
+
+            /*
+             * Encrypted `sources` payload used by established HiAnime
+             * provider flows.
+             */
+            val decrypted = extractEncryptedSourcePayload(raw)
+            if (decrypted.isNotEmpty()) {
+                return decrypted
+            }
+
+            /*
+             * Standard response often has a direct iframe/embed `link`.
+             */
+            val links = sourceLinkFromJson(raw)
+            if (links.isNotEmpty()) {
+                return links
+            }
+        }
+
+        return emptyList()
+    }
+
+    private suspend fun resolveEmbedMedia(
+        embedUrl: String,
+        referer: String
+    ): List<Pair<String, String>> {
+        val response = runCatching {
+            app.get(
+                embedUrl,
+                headers = pageHeaders + mapOf(
+                    "Referer" to referer,
+                    "Origin" to mainUrl
+                )
+            )
+        }.getOrNull() ?: return emptyList()
+
+        val found = linkedMapOf<String, String>()
+
+        fun addCandidate(
+            value: String?,
+            sourceReferer: String = embedUrl
+        ) {
+            if (value.isNullOrBlank()) return
+
+            val normalized = value
+                .trim()
+                .replace("\\/", "/")
+                .replace("\\u002F", "/")
+                .replace("\\u002f", "/")
+                .replace("\\u0026", "&")
+                .replace("&amp;", "&")
+                .trim(
+                    '"',
+                    '\'',
+                    '`',
+                    ',',
+                    ';',
+                    ')',
+                    ']',
+                    '}'
+                )
+
+            val resolved = absoluteUrl(
+                normalized,
+                embedUrl
+            )
+
+            if (isMediaUrl(resolved)) {
+                found.putIfAbsent(
+                    resolved,
+                    sourceReferer
+                )
+            }
+        }
+
+        directMediaUrls(
+            document = response.document,
+            html = response.text,
+            baseUrl = embedUrl
+        ).forEach {
+            addCandidate(it)
+        }
+
+        val normalized = response.text
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+
+        /*
+         * Generic absolute HLS/MP4 URLs.
+         */
+        Regex(
+            """https?://[^"'<>\\\s]+?\.(?:m3u8|mp4|mpd|webm|m4v|mov|mkv)(?:\?[^"'<>\\\s]*)?"""
+        ).findAll(normalized).forEach {
+            addCandidate(it.value)
+        }
+
+        /*
+         * Browser capture supplied by the user showed the final player
+         * manifest at hls2.aniwatchtv.uk/.../master.m3u8. Scan for that exact
+         * host/path family even if the JS stores it in an escaped string.         */
+        Regex(
+            """(?:https?:)?//hls2\.aniwatchtv\.uk/[^"'<>\\\s]+/master\.m3u8(?:\?[^"'<>\\\s]*)?"""
+        )
+            .findAll(normalized)
+            .forEach {
+                addCandidate(it.value)
+            }
+
+        /*
+         * Some player configs store only a URL-bearing JSON property.
+         */
+        Regex(
+            """(?i)(?:file|url|source|src|stream|streamUrl|playlist|manifest)\s*[:=]\s*["']([^"']+)["']"""
+        )
+            .findAll(normalized)
+            .forEach { match ->
+                addCandidate(
+                    match.groupValues.getOrNull(1)
+                )
+            }
+
+        return found.map { (media, sourceRef) ->
+            media to sourceRef
+        }
+    }
+
+    private fun isEmbedUrl(
+        url: String
+    ): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+
+        if (
+            lower.startsWith("http://") ||
+            lower.startsWith("https://")
+        ) {
+            return !isMediaUrl(lower) &&
+                (
+                    lower.contains("zokoanime") ||
+                        lower.contains("megacloud") ||
+                        lower.contains("vidstream") ||
+                        lower.contains("vidnest") ||
+                        lower.contains("stream")
+                )
+        }
+
+        return false
+    }
+
+    private fun qualityFromUrl(
+        url: String
+    ): Int {
+        val value = url.lowercase(Locale.ROOT)
+
+        return when {
+            "2160" in value || "4k" in value ->
+                Qualities.P2160.value
+
+            "1440" in value ->
+                Qualities.P1440.value
+
+            "1080" in value ->
+                Qualities.P1080.value
+
+            "720" in value ->
+                Qualities.P720.value
+
+            "480" in value ->
+                Qualities.P480.value
+
+            "360" in value ->
+                Qualities.P360.value
+
+            else ->
+                Qualities.Unknown.value
+        }
+    }
+
+    private suspend fun emitDirect(
+        url: String,
+        referer: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val type =
+            when {
+                url.contains(".m3u8", true) ->
+                    ExtractorLinkType.M3U8
+
+                url.contains(".mpd", true) ->
+                    ExtractorLinkType.DASH
+
+                else ->
+                    ExtractorLinkType.VIDEO
+            }
+
+        callback(
+            newExtractorLink(
+                source = name,
+                name = "Hi Anime Direct",
+                url = url,
+                type = type
+            ) {
+                this.referer = referer
+                this.quality = qualityFromUrl(url)
+            }
+        )
+    }
+
+    private fun directMediaUrls(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun add(raw: String?) {
+            if (raw.isNullOrBlank()) return
+
+            val resolved =
+                absoluteUrl(
+                    raw
+                        .trim()
+                        .replace("\\/", "/")
+                        .replace("\\u002F", "/")
+                        .replace("\\u002f", "/")
+                        .replace("\\u0026", "&")
+                        .replace("&amp;", "&")
+                        .trim(
+                            '"',
+                            '\'',
+                            '`',
+                            ',',
+                            ';',
+                            ')',
+                            ']',
+                            '}'
+                        ),
+                    baseUrl
+                )
+
+            val path =
+                resolved.substringBefore('?')
+                    .lowercase(Locale.ROOT)
+
+            if (
+                path.endsWith(".m3u8") ||
+                path.endsWith(".mp4") ||
+                path.endsWith(".mpd") ||
+                path.endsWith(".webm") ||
+                path.endsWith(".m4v") ||
+                path.endsWith(".mov") ||
+                path.endsWith(".mkv")
+            ) {
+                found.add(resolved)
+            }
+        }
+
+        document.select(
+            "video[src], video source[src], source[src], " +
+                "[data-src], [data-file], [data-video], [data-source]"
+        ).forEach { element ->
+            add(element.attr("src"))
+            add(element.attr("data-src"))
+            add(element.attr("data-file"))
+            add(element.attr("data-video"))
+            add(element.attr("data-source"))
+        }
+
+        val normalized = html
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+
+        listOf(
+            Regex(
+                """(?is)(?:https?:)?//[^"'<>\s\\]+?\.(?:m3u8|mp4|mpd|webm|m4v|mov|mkv)(?:\?[^"'<>\s\\]*)?"""
+            ),
+            Regex(
+                """(?is)(?:src|file|url|video|videoUrl|stream|streamUrl|playlist|manifest)\s*[:=]\s*["']([^"']+?\.(?:m3u8|mp4|mpd|webm|m4v|mov|mkv)(?:\?[^"']*)?)["']"""
+            )
+        ).forEach { pattern ->
+            pattern.findAll(normalized).forEach { match ->
+                add(
+                    match.groupValues
+                        .getOrNull(1)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: match.value
+                )
+            }
+        }
+
+        return found.toList()
+    }
+
+    private fun episodeIdFromData(
+        data: String
+    ): Pair<String, String?> {
+        val separator = data.indexOf("||")
+
+        if (separator < 0) {
+            return data.trim() to episodeIdFromUrl(data)
+        }
+
+        return data.substring(0, separator).trim() to
+            data.substring(separator + 2)
+                .trim()
+                .takeIf { it.isNotBlank() }
+    }
+
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        /*
+         * One fresh resolution per Play:
+         *
+         *   detail/watch URL
+         *       -> current episode id
+         *       -> fresh server list
+         *       -> fresh source/embed
+         *       -> current HLS/MP4
+         */
+        val pageData = data.substringBefore("||").trim()
+        val storedEpisodeId =
+            data.substringAfter(
+                "||",
+                ""
+            ).trim()
+                .takeIf { it.isNotBlank() }
+
+        if (pageData.isBlank()) return false
+
+        if (isMediaUrl(pageData)) {
+            emitDirect(
+                pageData,
+                "$mainUrl/",
+                callback
+            )
+            return true
+        }
+
+        val pageUrl = absoluteUrl(pageData)
+
+        /*
+         * Recreate a browser-like session on every Play action. This is
+         * important because the site issues XSRF/session cookies which are
+         * then required by the AJAX server/source calls.
+         */
+        val cookieJar = createFreshSession(pageUrl)
+
+        val watchHeaders = pageHeaders.toMutableMap()
+        watchHeaders["Referer"] = "$mainUrl/"
+
+        cookieHeader(cookieJar)
+            .takeIf { it.isNotBlank() }
+            ?.let {
+                watchHeaders["Cookie"] = it
+            }
+
+        val watchResponse = runCatching {
+            app.get(
+                pageUrl,
+                headers = watchHeaders
+            )
+        }.getOrNull() ?: return false
+
+        captureSetCookies(
+            watchResponse.headers,
+            cookieJar
+        )
+
+        /*
+         * IMPORTANT:
+         * Movies on HiAnime also use an episode-style internal id on the
+         * watch page. The public HiAnime API exposes the same server/source
+         * pipeline for movies and TV episodes. Therefore do not require the
+         * UI to be a TvSeries before resolving the episode id.
+         */
+        val episodeId =
+            storedEpisodeId
+                ?: episodeIdFromUrl(pageData)
+                ?: watchResponse.document
+                    .selectFirst("[data-episode-id]")
+                    ?.attr("data-episode-id")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                ?: watchResponse.document
+                    .selectFirst("#ani_detail[data-id]")
+                    ?.attr("data-id")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                ?: episodeIdFromUrl(pageUrl)
+
+        if (episodeId.isNullOrBlank()) {
+            /*
+             * Last chance for a page-embedded direct media URL.
+             */
+            val direct = directMediaUrls(
+                document = watchResponse.document,
+                html = watchResponse.text,
+                baseUrl = pageUrl
+            )
+
+            direct.forEach {
+                emitDirect(
+                    it,
+                    pageUrl,
+                    callback
+                )
+            }
+
+            return direct.isNotEmpty()
+        }
+
+        val servers = getEpisodeServers(
+            episodeId = episodeId,
+            referer = pageUrl,
+            cookieJar = cookieJar
+        )
+
+        if (servers.isEmpty()) {
+            return false
+        }
+
+        val orderedServers = servers.sortedWith(
+            compareBy<ServerInfo> {
+                when {
+                    it.type.equals("sub", true) -> 0
+                    it.type.equals("dub", true) -> 1
+                    it.type.equals("raw", true) -> 2
+                    else -> 3
+                }
+            }.thenBy {
+                it.name
+            }
+        )
+
+        /*
+         * Try every server. A dead HD-1 must not make the whole episode fail
+         * when HD-2/HD-3 has a working source.
+         */
+        for (server in orderedServers) {
+            var sources = getEpisodeSources(
+                serverId = server.id,
+                episodeId = episodeId,
+                referer = pageUrl,
+                cookieJar = cookieJar
+            )
+
+            /*
+             * If the current site's source endpoint gives no playable source,
+             * ask the normalized HiAnime mapper before touching an embed page.
+             * This remains fresh per Play and avoids persisting expired URLs.
+             */
+            if (sources.isEmpty()) {
+                sources = getMapperSources(
+                    episodeId = episodeId,
+                    server = server
+                )
+            }
+
+            if (sources.isEmpty()) continue
+
+            for (source in sources) {
+                val cleanSource = source
+                    .replace("\\/", "/")
+                    .replace("\\u002F", "/")
+                    .replace("\\u0026", "&")
+                    .replace("&amp;", "&")
+                    .trim()
+
+                if (isMediaUrl(cleanSource)) {
+                    val streamReferer =
+                        if (
+                            cleanSource.contains(
+                                "hls2.aniwatchtv.uk",
+                                true
+                            )
+                        ) {
+                            "https://zokoanime.video/"
+                        } else {
+                            pageUrl
+                        }
+
+                    emitDirect(
+                        cleanSource,
+                        streamReferer,
+                        callback
+                    )
+                    return true
+                }
+
+                if (
+                    cleanSource.startsWith(
+                        "http://",
+                        true
+                    ) ||
+                    cleanSource.startsWith(
+                        "https://",
+                        true
+                    )
+                ) {
+                    /*
+                     * First try to discover the actual media manifest from
+                     * the embed page itself.
+                     */
+                    val resolved = resolveEmbedMedia(
+                        embedUrl = cleanSource,
+                        referer = pageUrl
+                    )
+
+                    if (resolved.isNotEmpty()) {
+                        resolved.forEach { (mediaUrl, mediaReferer) ->
+                            emitDirect(
+                                mediaUrl,
+                                mediaReferer,
+                                callback
+                            )
+                        }
+                        return true
+                    }
+
+                    /*
+                     * Then let any installed CloudStream extractor handle
+                     * the provider-specific embed.
+                     */
+                    var emitted = false
+
+                    runCatching {
+                        loadExtractor(
+                            cleanSource,
+                            pageUrl,
+                            subtitleCallback
+                        ) { link ->
+                            emitted = true
+                            callback(link)
+                        }
+                    }
+
+                    if (emitted) {
+                        return true
+                    }
+                }
+            }
+        }
+
+        /*
+         * If the current page itself contains an HLS/MP4 URL, use it as a
+         * final fallback. This is still a fresh request made during playback.
+         */
+        val pageDirect = directMediaUrls(
+            document = watchResponse.document,
+            html = watchResponse.text,
+            baseUrl = pageUrl
+        )
+
+        pageDirect.forEach {
+            emitDirect(
+                it,
+                pageUrl,
+                callback
+            )
+        }
+
+        return pageDirect.isNotEmpty()
+    }
+
+}
