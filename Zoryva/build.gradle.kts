@@ -12,7 +12,7 @@ cloudstream {
     language = "hi"
     iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/Zoryva/icon.svg"
     isCrossPlatform = true
-    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "msujoy149/Movie-Flick")
+    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "MyselfHumayunShariarHimu/MovieCloud")
 }
 android {
     namespace = "com.movieflick.zoryva"
