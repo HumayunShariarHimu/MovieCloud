@@ -13,3 +13,11 @@ main{max-width:1240px;margin:auto;padding:0 24px}.hero{min-height:570px;display:
 footer{max-width:1240px;margin:auto;padding:22px 24px 35px;border-top:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;color:#65708d;font-size:10px}footer a{color:#9aa5c2}
 @media(max-width:900px){nav a:not(.repo-link){display:none}.hero{grid-template-columns:1fr;min-height:auto;padding:80px 0 40px}.hero-orb{height:300px;order:-1}.provider-grid{grid-template-columns:repeat(2,1fr)}.install,.about{grid-template-columns:1fr}.about{gap:20px}}
 @media(max-width:620px){main{padding:0 15px}.topbar{padding:0 15px}.hero{padding-top:50px}.hero h1{font-size:48px;letter-spacing:-2.5px}.hero p{font-size:14px}.hero-orb{height:260px;transform:scale(.82)}.toolbar{align-items:stretch;flex-direction:column}.tools{flex-direction:column}.search{min-width:0}.provider-grid{grid-template-columns:1fr}.stats{gap:17px}.stats div{padding-right:17px}.stats strong{font-size:21px}.install-panel,.install-code{padding:18px}footer{padding:20px 15px;flex-direction:column;gap:8px}.actions a{font-size:9px}}
+
+/* Motion and accessibility polish */
+@keyframes drift{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(0,-10px,0)}}
+@keyframes pulseGlow{0%,100%{opacity:.55;box-shadow:0 0 8px var(--green)}50%{opacity:1;box-shadow:0 0 18px var(--green)}}
+@keyframes orbit{to{transform:rotate(360deg)}}
+.hero-orb{animation:drift 5s ease-in-out infinite}.hero-orb i:nth-of-type(3){animation:orbit 22s linear infinite}.pulse{animation:pulseGlow 1.8s ease-in-out infinite}.card{animation:fadeUp .5s ease both}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.disabled{flex:1;text-align:center;border:1px solid #202743;background:#080b15;color:#505a77;padding:8px 5px;border-radius:8px;font-size:10px;font-weight:800;cursor:not-allowed}.actions button{font-family:inherit;cursor:pointer}.actions .copy{color:#aeb8d4}.availability{white-space:nowrap}.availability.fail{color:#ff7bcf}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.hero-orb,.hero-orb i,.pulse,.card{animation:none}}
