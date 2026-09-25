@@ -107,6 +107,33 @@ Each provider is kept in its own module so that source-specific logic can evolve
 
 ---
 
+## 🌐 MovieCloud Web App & Media Player
+
+The repository also contains a static web interface under `web/` plus a Vercel-compatible server function under `api/stream.js`.
+
+The web app provides:
+
+- 📦 Live artifact status for CS3/JAR packages
+- 🔎 Provider search and filtering
+- 📱 Responsive mobile UI
+- ▶️ Native HTML5 media playback for **authorized direct MP4/HLS sources**
+- ⏩ Range-aware media requests for seeking/resume
+- 🛡️ Server-side host allowlisting
+- 🚫 No provider webpage iframe is required for the media-player path
+- 🔗 External provider fallback when a browser-compatible direct media URL is not available
+
+### Vercel media gateway
+
+For a Vercel deployment, configure the environment variable:
+
+`ALLOWED_STREAM_HOSTS=media.example.com,cdn.example.com`
+
+Only hosts explicitly listed in this variable can be relayed by `/api/stream`. This is intentionally an allowlist rather than an open proxy.
+
+The player expects a **direct media URL** such as an authorized MP4 or HLS manifest. A provider webpage URL is not a media URL.
+
+> The gateway is intended for media that you own or are authorized to relay. It does not scrape provider pages, bypass access controls, defeat DRM, or turn third-party websites into an unrestricted proxy.
+
 ## 🚀 Using MovieCloud with CloudStream
 
 1. Open your CloudStream-compatible application.
