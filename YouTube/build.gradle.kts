@@ -6,6 +6,7 @@ cloudstream {
     status = 1
     tvTypes = listOf("Other","Live","TvSeries")
     language = "hi"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/YouTube/icon.svg"
     isCrossPlatform = true
 }
 
