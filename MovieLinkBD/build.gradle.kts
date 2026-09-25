@@ -12,7 +12,7 @@ cloudstream {
     status = 1
     tvTypes = listOf("Movie","TvSeries","Anime")
     language = "bn"
-    iconUrl = "https://movielinkbd.tv/favicon.png"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MovieLinkBD/icon.svg"
     isCrossPlatform = true
     setRepo(System.getenv("GITHUB_REPOSITORY") ?: "msujoy149/Movie-Flick")
 }
