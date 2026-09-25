@@ -997,4 +997,1002 @@ class CinePlexFTP : MainAPI() {
             emitTvMediaLink(
                 mediaUrl = finalUrl,
                 callback = callback,
-                referer = cleanEpisodeUrl,
+                referer = cleanEpisodeUrl,                headersOverride = finalHeaders
+            )
+
+            return true
+        }
+
+        /*
+         * ALWAYS resolve through the real Cine Plex player page.
+         * This is critical for All Movies because those cards commonly use
+         * view.php?id=..., while the full movie source lives in player.php.
+         */
+        val playerUrl = toPlayerUrl(input) ?: input
+        val response = runCatching {
+            app.get(
+                playerUrl,
+                headers = pageHeaders(playerUrl) + mapOf(
+                    "Cache-Control" to "no-cache, no-store, max-age=0",
+                    "Pragma" to "no-cache"
+                )
+            )
+        }.getOrNull() ?: return false
+
+        /*
+         * PRIMARY SOURCE ONLY:
+         * Cine Plex exposes the complete movie as `const videoSrc = ...`
+         * on its own player page. We take that exact URL, including md5 and
+         * expires. A fresh request is made on every Play, so a changed token
+         * is automatically picked up.
+         */
+        val playerCandidates = extractPlayerVideoSrcCandidates(
+            response.text,
+            playerUrl
+        )
+            .filter { isCinePlexFullMediaUrl(it) }
+            .sortedByDescending { playerMediaScore(it) }
+
+        val bestPlayerSource = playerCandidates.firstOrNull()
+        if (bestPlayerSource != null) {
+            emitMediaLink(bestPlayerSource, callback)
+            return true
+        }
+
+        /*
+         * SECONDARY SOURCE:
+         * Some Cine Plex player revisions place the same full source directly
+         * in <video>/<source> or player metadata. Only Cine Plex /v/m/ or
+         * Cine Plex VOD media is accepted. YouTube, trailers, previews and
+         * unrelated embeds are deliberately rejected.
+         */
+        val directSources = extractMediaUrls(
+            response.document,
+            response.text,
+            playerUrl
+        )
+            .filter { isCinePlexFullMediaUrl(it) }
+            .sortedByDescending { playerMediaScore(it) }
+
+        val bestDirectSource = directSources.firstOrNull()
+        if (bestDirectSource != null) {
+            emitMediaLink(bestDirectSource, callback)
+            return true
+        }
+
+        /*
+         * One forced fresh reload. This handles cases where the first response
+         * was cached upstream or returned an already-expired signed token.
+         */
+        val retryResponse = runCatching {
+            app.get(
+                playerUrl,
+                headers = pageHeaders(playerUrl) + mapOf(
+                    "Cache-Control" to "no-cache, no-store, max-age=0",
+                    "Pragma" to "no-cache",
+                    "X-Requested-With" to "XMLHttpRequest"
+                )
+            )
+        }.getOrNull() ?: return false
+
+        val retrySource = extractPlayerVideoSrcCandidates(
+            retryResponse.text,
+            playerUrl
+        )
+            .filter { isCinePlexFullMediaUrl(it) }
+            .sortedByDescending { playerMediaScore(it) }
+            .firstOrNull()
+
+        if (retrySource != null) {
+            emitMediaLink(retrySource, callback)
+            return true
+        }
+
+        /*
+         * DO NOT fall back to external iframes here.
+         * Cine Plex pages may contain YouTube trailers, and CloudStream
+         * extractors would otherwise expose those trailers as playable links.
+         */
+        return false
+    }
+
+    private fun normalizeContentUrl(url: String): String {
+        val cleaned = cleanUrl(url)
+        if (cleaned.isBlank()) return cleaned
+        return if (
+            cleaned.contains("view.php?id=", true) ||
+            cleaned.contains("details.php?id=", true) ||
+            cleaned.contains("movie.php?id=", true)
+        ) {
+            cleaned
+        } else {
+            cleaned
+        }
+    }
+
+    private fun toPlayerUrl(url: String): String? {
+        val cleaned = cleanUrl(url)
+        if (cleaned.isBlank()) return null
+        if (cleaned.contains("player.php", true)) return cleaned
+        if (cleaned.contains("watch.php", true)) return null
+
+        val uri = runCatching { URI(cleaned) }.getOrNull() ?: return null
+        val query = uri.rawQuery.orEmpty()
+        if (query.isBlank()) return null
+
+        val id = query.split('&')
+            .firstOrNull {
+                it.substringBefore('=').equals("id", true)
+            }
+            ?.substringAfter('=', "")
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val h = query.split('&')
+            .firstOrNull {
+                it.substringBefore('=').equals("h", true)
+            }
+            ?.substringAfter('=', "")
+            ?.takeIf { it.isNotBlank() }
+
+        val scheme = uri.scheme?.takeIf { it.isNotBlank() } ?: "http"
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: URI(mainUrl).host
+        val base = "$scheme://$host"
+
+        return "$base/player.php?id=$id" + if (h != null) "&h=$h" else ""
+    }
+
+    private fun extractPlayerVideoSrc(
+        html: String,
+        baseUrl: String
+    ): String? {
+        return extractPlayerVideoSrcCandidates(html, baseUrl)
+            .filter { isCinePlexFullMediaUrl(it) }
+            .maxByOrNull { playerMediaScore(it) }
+    }
+
+    private fun extractPlayerVideoSrcCandidates(
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val cleaned = html
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+
+        val found = linkedSetOf<String>()
+
+        val patterns = listOf(
+            Regex("""(?is)\b(?:const|let|var)?\s*videoSrc\s*=\s*[\"']([^\"']+)[\"']"""),
+            Regex("""(?is)[\"']videoSrc[\"']?\s*[:=]\s*[\"']([^\"']+)[\"']"""),
+            Regex("""(?is)\bvideoSrc\s*\+=\s*[\"']([^\"']+)[\"']""")
+        )
+
+        for (pattern in patterns) {
+            pattern.findAll(cleaned).forEach { match ->
+                val raw = match.groupValues.getOrNull(1)?.trim().orEmpty()
+                if (raw.isBlank()) return@forEach
+
+                val resolved = absoluteUrl(raw, baseUrl)
+                if (isCinePlexFullMediaUrl(resolved)) {
+                    found.add(resolved)
+                }
+            }
+        }
+
+        return found.toList()
+    }
+
+    /*
+     * Cine Plex TV episode media uses HLS manifests under /hls/tr/.
+     * This is intentionally TV-only and does not change movie media rules.
+     */
+    /*
+     * TV SERIES ONLY:
+     * Crawl the exact Cine Plex watch page and collect the HLS manifest from
+     * both the rendered <video>/<source> element and raw page HTML/JS.
+     */
+    private fun tvManifestUrlVariants(url: String): List<String> {
+        val result = linkedSetOf<String>()
+        val clean = cleanUrl(url).trim()
+        if (clean.isBlank()) return emptyList()
+
+        result.add(clean)
+
+        runCatching {
+            val uri = URI(clean)
+            val scheme = uri.scheme?.lowercase(Locale.ROOT).orEmpty()
+            val host = uri.host.orEmpty()
+            val path = uri.rawPath.orEmpty()
+            val query = uri.rawQuery.orEmpty()
+
+            when (scheme) {
+                "http", "https" -> {
+                    val other = if (scheme == "http") "https" else "http"
+                    if (host.isNotBlank() && path.isNotBlank()) {
+                        result.add(
+                            "$other://$host$path" +
+                                if (query.isBlank()) "" else "?$query"
+                        )
+                    }
+                }
+            }
+        }
+
+        return result.toList()
+    }
+
+    private fun tvPlaybackHeaderModes(
+        episodeUrl: String
+    ): List<Pair<String, Map<String, String>>> {
+        val ua =
+            "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+        val root = "$mainUrl/"
+        return listOf(
+            episodeUrl to mapOf(
+                "User-Agent" to ua,
+                "Accept" to "*/*",
+                "Cache-Control" to "no-cache",
+                "Pragma" to "no-cache",
+                "Origin" to mainUrl
+            ),
+            episodeUrl to mapOf(
+                "User-Agent" to ua,
+                "Accept" to "*/*",
+                "Cache-Control" to "no-cache",
+                "Pragma" to "no-cache"
+            ),
+            root to mapOf(
+                "User-Agent" to ua,
+                "Accept" to "*/*",
+                "Cache-Control" to "no-cache",
+                "Pragma" to "no-cache",
+                "Origin" to mainUrl
+            )
+        )
+    }
+
+    /*
+     * Returns:
+     *   manifest URL, referer, headers
+     *
+     * The request itself is only used to verify that the manifest is reachable
+     * and actually looks like an HLS playlist. The returned URL is still sent
+     * directly to CloudStream; no proxy is introduced.
+     */
+    private suspend fun findPlayableTvManifest(
+        sources: List<String>,
+        episodeUrl: String
+    ): Triple<String, String, Map<String, String>>? {
+        for (source in sources) {
+            for (manifestUrl in tvManifestUrlVariants(source)) {
+                for ((referer, headers) in tvPlaybackHeaderModes(episodeUrl)) {
+                    val response = runCatching {
+                        app.get(
+                            manifestUrl,
+                            headers = headers + mapOf(
+                                "Referer" to referer
+                            )
+                        )
+                    }.getOrNull() ?: continue
+
+                    val body = response.text
+                        .replace("\uFEFF", "")
+                        .trimStart()
+
+                    /*
+                     * A valid HLS manifest normally begins with #EXTM3U.
+                     * Master playlists additionally use EXT-X-STREAM-INF;
+                     * media playlists use EXTINF.
+                     */
+                    if (
+                        body.startsWith("#EXTM3U", ignoreCase = false) ||
+                        body.contains("#EXT-X-STREAM-INF", ignoreCase = true) ||
+                        body.contains("#EXTINF", ignoreCase = true)
+                    ) {
+                        return Triple(
+                            manifestUrl,
+                            referer,
+                            headers
+                        )
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun buildTvEpisodePageCandidates(url: String): List<String> {
+        val clean = url.substringBefore('#').trim()
+        val result = linkedSetOf<String>()
+        result.add(clean)
+
+        runCatching {
+            val uri = URI(clean)
+            val scheme = uri.scheme?.lowercase(Locale.ROOT).orEmpty()
+            val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+            val path = uri.rawPath.orEmpty()
+            val query = uri.rawQuery.orEmpty()
+
+            if (host.isNotBlank() && path.isNotBlank()) {
+                val otherScheme = when (scheme) {
+                    "http" -> "https"
+                    "https" -> "http"
+                    else -> null
+                }
+
+                if (otherScheme != null) {
+                    result.add(
+                        "$otherScheme://$host$path" +
+                            if (query.isBlank()) "" else "?$query"
+                    )
+                }
+            }
+        }
+
+        /*
+         * Also try the same episode without autoplay. The actual HLS source
+         * is the same player source, but this can bypass page variants.
+         */
+        val withoutAutoplay = clean.replace(
+            Regex("(?i)([?&])autoplay=[^&]*&?"),
+            "$1"
+        )
+            .replace("?&", "?")
+            .replace(Regex("[?&]$"), "")
+
+        if (withoutAutoplay != clean) {
+            result.add(withoutAutoplay)
+        }
+
+        return result.toList()
+    }
+
+    private fun buildTvPageRequestVariants(
+        url: String
+    ): List<Pair<String, Map<String, String>>> {
+        val base = pageHeaders("$mainUrl/")
+        return listOf(
+            url to (
+                base + mapOf(
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Cache-Control" to "no-cache, no-store, max-age=0",
+                    "Pragma" to "no-cache"
+                )
+            ),
+            url to (
+                base + mapOf(
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Cache-Control" to "no-cache, no-store, max-age=0",
+                    "Pragma" to "no-cache",
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "Sec-Fetch-Dest" to "document",
+                    "Sec-Fetch-Mode" to "navigate",
+                    "Sec-Fetch-Site" to "same-origin"
+                )
+            )
+        )
+    }
+
+    private fun appendQueryParameter(
+        url: String,
+        key: String,
+        value: String
+    ): String {
+        val separator = if (url.contains('?')) '&' else '?'
+        return "$url$separator${URLEncoder.encode(key, StandardCharsets.UTF_8.toString())}=" +
+            URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
+    }
+
+    /*
+     * Extremely broad TV-only M3U8 crawler.
+     *
+     * It scans:
+     *   - normal raw HTML
+     *   - escaped HTML
+     *   - URL-encoded HTML
+     *   - JS variables
+     *
+     * Only a Cine Plex-hosted URL containing .m3u8 is accepted.
+     */
+    private fun extractAnyCinePlexM3u8(
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        if (html.isBlank()) return emptyList()
+
+        val variants = linkedSetOf<String>()
+        variants.add(html)
+
+        val normalized = html
+            .replace("\\/", "/")
+            .replace("\\x2F", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("\\u0026", "&")
+            .replace("\\u003A", ":")
+            .replace("\\u003a", ":")
+            .replace("&amp;", "&")
+
+        variants.add(normalized)
+
+        runCatching {
+            variants.add(
+                URLDecoder.decode(
+                    normalized,
+                    StandardCharsets.UTF_8.toString()
+                )
+            )
+        }
+
+        val found = linkedSetOf<String>()
+
+        fun add(raw: String?) {
+            if (raw.isNullOrBlank()) return
+
+            val candidate = raw
+                .trim()
+                .replace("\\/", "/")
+                .replace("\\x2F", "/")
+                .replace("\\u002F", "/")
+                .replace("\\u002f", "/")
+                .replace("\\u0026", "&")
+                .replace("&amp;", "&")
+                .trim('"', '\'', '`', ',', ';', ')', ']', '}')
+
+            if (candidate.isBlank()) return
+
+            val absolute = absoluteUrl(candidate, baseUrl)
+            if (isCinePlexTvMediaUrl(absolute)) {
+                found.add(absolute)
+            }
+        }
+
+        val patterns = listOf(
+            Regex(
+                """(?is)(?:https?:)?//[^"'<>\s\\]+?\.m3u8(?:\?[^"'<>\s\\]*)?"""
+            ),
+            Regex(
+                """(?is)/[^"'<>\s\\]*\.m3u8(?:\?[^"'<>\s\\]*)?"""
+            ),
+            Regex(
+                """(?is)(?:src|source|file|url|video|videoUrl|stream|streamUrl|playlist|manifest)\s*[:=]\s*["']([^"']+?\.m3u8(?:\?[^"']*)?)["']"""
+            ),
+            Regex(
+                """(?is)(?:https?:)?//[^"'<>\s\\]+/hls/[^"'<>\s\\]+?\.m3u8(?:\?[^"'<>\s\\]*)?"""
+            )
+        )
+
+        for (variant in variants) {
+            for (pattern in patterns) {
+                pattern.findAll(variant).forEach { match ->
+                    val value = match.groupValues
+                        .getOrNull(1)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: match.value
+
+                    add(value)
+                }
+            }
+        }
+
+        return found.toList()
+    }
+
+
+    /*
+     * Extract ONLY Cine Plex HLS playlists that are inside a video-file
+     * directory, e.g.:
+     *   /hls/tr/.../Episode.mp4/index-v1-a1.m3u8
+     *   /hls/tr/.../Episode.mkv/index-v1-a1.m3u8
+     *
+     * No assumption is made about the playlist filename.
+     */
+    private fun extractExactCinePlexHlsPlaylists(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun add(raw: String?) {
+            if (raw.isNullOrBlank()) return
+            val value = raw
+                .trim()
+                .replace("\\/", "/")
+                .replace("\\x2F", "/")
+                .replace("\\u002F", "/")
+                .replace("\\u002f", "/")
+                .replace("\\u0026", "&")
+                .replace("\\u003A", ":")
+                .replace("\\u003a", ":")
+                .replace("&amp;", "&")
+                .trim('"', '\'', '`', ',', ';', ')', ']', '}')
+
+            if (value.isBlank()) return
+            val absolute = absoluteUrl(value, baseUrl)
+            if (isExactCinePlexHlsUrl(absolute)) {
+                found.add(cleanUrl(absolute))
+            }
+        }
+
+        document.select(
+            "video source[src], video[src], source[src], " +
+                "[src], [data-src], [data-video], [data-source], " +
+                "[data-stream], [data-manifest], [data-playlist]"
+        ).forEach { element ->
+            add(element.attr("src"))
+            add(element.attr("data-src"))
+            add(element.attr("data-video"))
+            add(element.attr("data-source"))
+            add(element.attr("data-stream"))
+            add(element.attr("data-manifest"))
+            add(element.attr("data-playlist"))
+        }
+
+        val variants = linkedSetOf<String>()
+        variants.add(html)
+        val normalized = html
+            .replace("\\/", "/")
+            .replace("\\x2F", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("\\u0026", "&")
+            .replace("\\u003A", ":")
+            .replace("\\u003a", ":")
+            .replace("&amp;", "&")
+        variants.add(normalized)
+        runCatching {
+            variants.add(
+                URLDecoder.decode(
+                    normalized,
+                    StandardCharsets.UTF_8.toString()
+                )
+            )
+        }
+
+        val absolutePattern = Regex(
+            """(?is)(?:https?:)?//[^\"'<>\s\\]+?/hls/[^\"'<>\s\\]*?\\.(?:mp4|mkv|webm|mov|m4v|avi|flv|ts)/[^\"'<>\s\\]+?\\.m3u8(?:\\?[^\"'<>\s\\]*)?"""
+        )
+        val relativePattern = Regex(
+            """(?is)/hls/[^\"'<>\s\\]*?\\.(?:mp4|mkv|webm|mov|m4v|avi|flv|ts)/[^\"'<>\s\\]+?\\.m3u8(?:\\?[^\"'<>\s\\]*)?"""
+        )
+
+        for (variant in variants) {
+            absolutePattern.findAll(variant).forEach { add(it.value) }
+            relativePattern.findAll(variant).forEach { add(it.value) }
+        }
+
+        return found.toList()
+    }
+
+    private fun isExactCinePlexHlsUrl(url: String): Boolean {
+        val cleaned = cleanUrl(url)
+        if (!isCinePlexTvMediaUrl(cleaned)) return false
+
+        val path = runCatching {
+            URI(cleaned).path.orEmpty()
+        }.getOrDefault("")
+
+        return Regex(
+            """(?i)^/hls/.+\\.(?:mp4|mkv|webm|mov|m4v|avi|flv|ts)/[^/]+\\.m3u8$"""
+        ).containsMatchIn(path)
+    }
+
+    private fun forceScheme(url: String, scheme: String): String {
+        val clean = cleanUrl(url)
+        if (clean.isBlank()) return clean
+
+        return runCatching {
+            val uri = URI(clean)
+            val host = uri.host.orEmpty()
+            if (host.isBlank()) return@runCatching clean
+
+            val port = if (uri.port >= 0) ":${uri.port}" else ""
+            val path = uri.rawPath.orEmpty()
+            val query = uri.rawQuery.orEmpty()
+
+            "$scheme://$host$port$path" +
+                if (query.isBlank()) "" else "?$query"
+        }.getOrElse { clean }
+    }
+
+    private fun tvExactHlsHeaders(
+        episodeUrl: String,
+        cookieJar: Map<String, String>
+    ): Map<String, String> {
+        val headers = linkedMapOf(
+            "User-Agent" to
+                "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+            "Accept" to "*/*",
+            "Accept-Language" to "en-US,en;q=0.9,bn;q=0.8",
+            "Accept-Encoding" to "gzip, deflate",
+            "Connection" to "keep-alive",
+            "Referer" to episodeUrl
+        )
+
+        val cookieHeader = cookieHeaderValue(cookieJar)
+        if (cookieHeader.isNotBlank()) {
+            headers["Cookie"] = cookieHeader
+        }
+
+        return headers
+    }
+
+    private fun cookieHeaderMap(
+        cookieJar: Map<String, String>
+    ): Map<String, String> {
+        val value = cookieHeaderValue(cookieJar)
+        return if (value.isBlank()) emptyMap() else mapOf("Cookie" to value)
+    }
+
+    private fun cookieHeaderValue(
+        cookieJar: Map<String, String>
+    ): String {
+        return cookieJar.entries
+            .filter { it.key.isNotBlank() && it.value.isNotBlank() }
+            .joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
+    private fun captureSetCookies(
+        headers: Headers,
+        cookieJar: MutableMap<String, String>
+    ) {
+        val setCookies = headers.values("Set-Cookie")
+        if (setCookies.isEmpty()) return
+
+        for (rawSetCookie in setCookies) {
+            val pair = rawSetCookie.substringBefore(';').trim()
+            val separator = pair.indexOf('=')
+            if (separator <= 0) continue
+
+            val name = pair.substring(0, separator).trim()
+            val value = pair.substring(separator + 1).trim()
+
+            if (name.isNotBlank() && value.isNotBlank()) {
+                cookieJar[name] = value
+            }
+        }
+    }
+
+    private fun extractHlsPlaylistUrisFromManifest(
+        manifestText: String,
+        manifestUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        val normalized = manifestText
+            .replace("\uFEFF", "")
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+
+        normalized
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filterNot { it.startsWith("#") }
+            .forEach { line ->
+                val token = line
+                    .trim()
+                    .trim('"', '\'', '`')
+                    .substringBefore('#')
+                    .trim()
+
+                if (!token.endsWith(".m3u8", ignoreCase = true)) return@forEach
+
+                val absolute = absoluteUrl(token, manifestUrl)
+                if (isExactCinePlexHlsUrl(absolute)) {
+                    found.add(cleanUrl(absolute))
+                } else if (isCinePlexTvMediaUrl(absolute)) {
+                    found.add(cleanUrl(absolute))
+                }
+            }
+
+        /*
+         * Some manifests can place a child URI inline with attributes.
+         * Keep a regex fallback for those variants.
+         */
+        Regex("""(?im)(?:https?://|/|[A-Za-z0-9._~%+\-]).*?\.m3u8(?:\?[^\s]*)?""")
+            .findAll(normalized)
+            .forEach { match ->
+                val candidate = match.value
+                    .trim()
+                    .trim('"', '\'', '`', ',', ';')
+                    .substringAfterLast("URI=", match.value)
+                    .trim('"', '\'', '`', ',', ';')
+
+                val absolute = absoluteUrl(candidate, manifestUrl)
+                if (
+                    isExactCinePlexHlsUrl(absolute) ||
+                    isCinePlexTvMediaUrl(absolute)
+                ) {
+                    found.add(cleanUrl(absolute))
+                }
+            }
+
+        return found.toList()
+    }
+
+    private fun extractTvHlsSources(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun add(raw: String?) {
+            if (raw.isNullOrBlank()) return
+
+            val value = raw
+                .trim()
+                .replace("\\/", "/")
+                .replace("\\u0026", "&")
+                .replace("\\u003A", ":")
+                .replace("&amp;", "&")
+                .trim('\"', '\'', '`', ',', ';', ')', ']', '}')
+
+            if (value.isBlank()) return
+
+            val resolved = absoluteUrl(value, baseUrl)
+            if (isCinePlexTvMediaUrl(resolved)) {
+                found.add(resolved)
+            }
+        }
+
+        /* Actual player DOM. */
+        document.select(
+            "video source[src], video[src], source[src], " +
+                "[data-src], [data-video], [data-source], [data-stream], " +
+                "[data-manifest], [data-playlist]"
+        ).forEach { element ->
+            add(element.attr("src"))
+            add(element.attr("data-src"))
+            add(element.attr("data-video"))
+            add(element.attr("data-source"))
+            add(element.attr("data-stream"))
+            add(element.attr("data-manifest"))
+            add(element.attr("data-playlist"))
+        }
+
+        val cleanedHtml = html
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("\\u003A", ":")
+            .replace("&amp;", "&")
+
+        /* Scan every raw HLS URL, not only one specific HTML shape. */
+        val patterns = listOf(
+            Regex("""(?is)(?:https?:)?//[^\"'<>\s]+/hls/tr/[^\"'<>\s]+?\.m3u8(?:\?[^\"'<>\s]*)?"""),
+            Regex("""(?is)/hls/tr/[^\"'<>\s]+?\.m3u8(?:\?[^\"'<>\s]*)?"""),
+            Regex("""(?is)(?:https?:)?//[^\"'<>\s]+?\.m3u8(?:\?[^\"'<>\s]*)?"""),
+            Regex("""(?is)(?:src|source|file|url|video|videoUrl|stream|streamUrl)\s*[:=]\s*[\"']([^\"']+?\.m3u8(?:\?[^\"']*)?)[\"']""")
+        )
+
+        for (pattern in patterns) {
+            pattern.findAll(cleanedHtml).forEach { match ->
+                val value = match.groupValues.getOrNull(1)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: match.value
+                add(value)
+            }
+        }
+
+        return found.toList()
+    }
+
+    private fun isCinePlexTvMediaUrl(url: String): Boolean {
+        val cleaned = cleanUrl(url)
+        if (!isMediaUrl(cleaned)) return false
+
+        val uri = runCatching { URI(cleaned) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+        val path = uri.path?.lowercase(Locale.ROOT).orEmpty()
+
+        if (host == "youtube.com" ||
+            host.endsWith(".youtube.com") ||
+            host == "youtu.be" ||
+            host.endsWith(".youtu.be")) {
+            return false
+        }
+
+        val cineplexHost = host == "cineplexbd.net" ||
+            host.endsWith(".cineplexbd.net")
+
+        return cineplexHost && path.startsWith("/hls/tr/") && path.endsWith(".m3u8")
+    }
+
+    private fun isCinePlexFullMediaUrl(url: String): Boolean {
+        val cleaned = cleanUrl(url)
+        if (!isMediaUrl(cleaned)) return false
+
+        val uri = runCatching { URI(cleaned) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+        val path = uri.path?.lowercase(Locale.ROOT).orEmpty()
+
+        if (host == "youtube.com" ||
+            host.endsWith(".youtube.com") ||
+            host == "youtu.be" ||
+            host.endsWith(".youtu.be")) {
+            return false
+        }
+
+        val cineplexHost = host == "cineplexbd.net" ||
+            host.endsWith(".cineplexbd.net")
+
+        if (!cineplexHost) return false
+
+        /* The verified full-movie player path is /v/m/. */
+        return path.startsWith("/v/m/") ||
+            host == "vod.cineplexbd.net"
+    }
+
+    private fun playerMediaScore(url: String): Int {
+        val lower = url.lowercase(Locale.ROOT)
+        var score = 0
+
+        if ("preview" in lower) score -= 1000
+        if ("trailer" in lower) score -= 1000
+        if ("sample" in lower) score -= 900
+        if ("clip" in lower) score -= 900
+        if ("teaser" in lower) score -= 900
+
+        if ("/v/m/" in lower) score += 1000
+        if ("/movies/" in lower) score += 250
+        if ("md5=" in lower) score += 100
+        if ("expires=" in lower) score += 100
+
+        if (lower.contains("2160") || lower.contains("4k")) score += 40
+        else if (lower.contains("1440")) score += 35
+        else if (lower.contains("1080")) score += 30
+        else if (lower.contains("720")) score += 20
+        else if (lower.contains("480")) score += 10
+
+        score += minOf(url.length / 20, 30)
+        return score
+    }
+
+
+    /*
+     * Emit the Cine Plex source as a native CloudStream video link.
+     *
+     * This function is intentionally suspend because newExtractorLink(...)
+     * is a suspend API in the current CloudStream runtime.
+     */
+    /*
+     * TV SERIES ONLY:
+     * Cine Plex's TV player serves the episode as an HLS master.m3u8 under
+     * /hls/tr/. The browser loads that manifest from the Cine Plex watch page,
+     * so the CloudStream link must keep a Cine Plex Referer as well.
+     *
+     * This is intentionally separate from the movie emitMediaLink() so no
+     * existing movie/category playback behavior is changed.
+     */
+    private suspend fun emitTvMediaLink(
+        mediaUrl: String,
+        callback: (ExtractorLink) -> Unit,
+        referer: String,
+        headersOverride: Map<String, String>? = null
+    ) {
+        val cleanMediaUrl = cleanUrl(mediaUrl).trim()
+        if (!isCinePlexTvMediaUrl(cleanMediaUrl)) return
+
+        val lower = cleanMediaUrl.lowercase(Locale.ROOT)
+
+        val quality = when {
+            "2160" in lower || "4k" in lower ->
+                Qualities.P2160.value
+
+            "1440" in lower ->
+                Qualities.P1440.value
+
+            "1080" in lower ->
+                Qualities.P1080.value
+
+            "720" in lower ->
+                Qualities.P720.value
+
+            "480" in lower ->
+                Qualities.P480.value
+
+            "360" in lower ->
+                Qualities.P360.value
+
+            else ->
+                Qualities.Unknown.value
+        }
+
+        /*
+         * Keep the request as close as possible to the website's actual
+         * same-origin HLS GET. In particular, do not add an Origin header.
+         */
+        val headers = headersOverride ?: mapOf(
+            "User-Agent" to
+                "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+            "Accept" to "*/*",
+            "Cache-Control" to "no-cache",
+            "Pragma" to "no-cache"
+        )
+
+        callback(
+            newExtractorLink(
+                source = name,
+                name = "Cine Plex TV HLS",
+                url = cleanMediaUrl,
+                type = ExtractorLinkType.M3U8
+            ) {
+                this.referer = referer
+                this.headers = headers
+                this.quality = quality
+            }
+        )
+    }
+
+    private suspend fun emitMediaLink(
+        mediaUrl: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val type = when {
+            mediaUrl.contains(".m3u8", true) ->
+                ExtractorLinkType.M3U8
+
+            mediaUrl.contains(".mpd", true) ->
+                ExtractorLinkType.DASH
+
+            else ->
+                ExtractorLinkType.VIDEO
+        }
+
+        val lower = mediaUrl.lowercase(Locale.ROOT)
+
+        val quality = when {
+            "2160" in lower || "4k" in lower ->
+                Qualities.P2160.value
+
+            "1440" in lower ->
+                Qualities.P1440.value
+
+            "1080" in lower ->
+                Qualities.P1080.value
+
+            "720" in lower ->
+                Qualities.P720.value
+
+            "480" in lower ->
+                Qualities.P480.value
+
+            "360" in lower ->
+                Qualities.P360.value
+
+            else ->
+                Qualities.Unknown.value
+        }
+
+        callback(
+            newExtractorLink(
+                source = name,
+                name = "Cine Plex Direct",
+                url = mediaUrl,
+                type = type
+            ) {
+                this.quality = quality
+            }
+        )
+    }
+
+    private fun extractDirectMediaFromDownloads(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun addDownload(raw: String?) {
+            if (raw.isNullOrBlank()) return
