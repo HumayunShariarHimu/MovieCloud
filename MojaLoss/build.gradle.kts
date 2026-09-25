@@ -24,7 +24,7 @@ cloudstream {
         "Anime"
     )
     language = "bn"
-    iconUrl = "https://www.mojaloss.stream/favicon.png"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MojaLoss/icon.svg"
     isCrossPlatform = true
 }
 
