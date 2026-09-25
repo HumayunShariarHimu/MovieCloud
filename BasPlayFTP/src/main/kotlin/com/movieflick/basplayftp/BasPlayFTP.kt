@@ -998,3 +998,524 @@ class BasPlayFTP : MainAPI() {
         emitMedia(selected, preferredReferer, headers, callback)
         return true
     }
+    private fun canonicalTvReferer(url: String): String {
+        if (!url.contains("tview.php", true)) return url
+        return removeQueryParam(url, "episode")
+            .substringBefore("#")
+    }
+
+    // BAS PLAY TV media requests observed in Chrome are intentionally minimal:
+    // Referer + browser UA + identity encoding. Keep this separate from Movie
+    // headers so the already-working Movie playback path is not altered.
+    private fun tvMediaHeaders(
+        referer: String
+    ): Map<String, String> = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+        "Accept" to "*/*"
+    )
+
+    private fun mediaHeaders(
+        referer: String,
+        cookieHeader: String? = null
+    ): Map<String, String> {
+        val headers = linkedMapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+            "Accept" to "*/*",
+            "Accept-Encoding" to "identity;q=1, *;q=0",
+            "Accept-Language" to "en-US,en;q=0.9,bn;q=0.8",
+            "Cache-Control" to "no-cache",
+            "Pragma" to "no-cache",
+            "Referer" to referer
+        )
+        if (!cookieHeader.isNullOrBlank()) headers["Cookie"] = cookieHeader
+        return headers
+    }
+
+    private fun cookieHeaderFromResponse(headers: Map<String, String>): String? {
+        val raw = headers.entries.firstOrNull { it.key.equals("Set-Cookie", true) }?.value ?: return null
+        val cookies = raw.split(Regex("(?i)(?<=\\;)\\s*(?=[A-Za-z0-9_!%.-]+=)"))
+            .map { it.substringBefore(';').trim() }
+            .filter { it.contains('=') }
+        return cookies.joinToString("; ").ifBlank { null }
+    }
+
+    /**
+     * Exact direct-link emitter modeled on the working Movie Haat provider:
+     * no invented headers, no cookie replay, no extra TV-specific request profile.
+     */
+    private suspend fun emitDirectMedia(
+        url: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val clean = url.substringBefore("#").trim()
+        if (clean.isBlank() || isTrailerUrl(clean) || isDownloadOnlyUrl(clean)) return
+
+        val lowered = clean.substringBefore("?").lowercase(Locale.ROOT)
+        val type = when {
+            lowered.endsWith(".m3u8") -> ExtractorLinkType.M3U8
+            lowered.endsWith(".mpd") -> ExtractorLinkType.DASH
+            else -> ExtractorLinkType.VIDEO
+        }
+
+        callback(
+            newExtractorLink(
+                source = name,
+                name = "Bas Play Direct",
+                url = clean,
+                type = type
+            ) {
+                quality = detectQuality(lowered)
+            }
+        )
+    }
+
+    private suspend fun emitMedia(
+        mediaUrl: String,
+        referer: String,
+        headers: Map<String, String>,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val clean = mediaUrl.substringBefore("#").trim()
+        if (clean.isBlank() || isTrailerUrl(clean) || isDownloadOnlyUrl(clean)) return
+
+        val lower = clean.substringBefore("?").lowercase(Locale.ROOT)
+        val type = when {
+            lower.endsWith(".m3u8") -> ExtractorLinkType.M3U8
+            lower.endsWith(".mpd") -> ExtractorLinkType.DASH
+            else -> ExtractorLinkType.VIDEO
+        }
+
+        val isTvMedia = referer.contains("tview.php", true) || clean.contains("/TV%20", true)
+
+        // Use the same VIDEO link type for direct .mkv/.mp4 playback in TV and
+        // Movies. The Movie path is already proven to work in CloudStream, and
+        // leaving the type explicit avoids handing a null/ambiguous MIME hint to
+        // Media3 for TV episodes.
+        callback(
+            newExtractorLink(
+                source = name,
+                name = if (isTvMedia) "Bas Play TV" else "Bas Play Direct",
+                url = clean,
+                type = type
+            ) {
+                this.referer = referer
+                this.headers = headers
+                this.quality = detectQuality(lower)
+            }
+        )
+    }
+
+    private fun detectQuality(value: String): Int = when {
+        Regex("(?i)\\b2160p\\b|\\b4k\\b").containsMatchIn(value) -> Qualities.P2160.value
+        Regex("(?i)\\b1440p\\b").containsMatchIn(value) -> Qualities.P1440.value
+        Regex("(?i)\\b1080p\\b").containsMatchIn(value) -> Qualities.P1080.value
+        Regex("(?i)\\b720p\\b").containsMatchIn(value) -> Qualities.P720.value
+        Regex("(?i)\\b480p\\b").containsMatchIn(value) -> Qualities.P480.value
+        Regex("(?i)\\b360p\\b").containsMatchIn(value) -> Qualities.P360.value
+        else -> Qualities.Unknown.value
+    }
+
+    private fun mediaScore(url: String): Int {
+        val lower = url.lowercase(Locale.ROOT)
+        var score = 0
+        if ("trailer" in lower) score -= 5000
+        if ("teaser" in lower) score -= 4000
+        if ("preview" in lower) score -= 4000
+        if ("sample" in lower) score -= 3500
+        if ("clip" in lower) score -= 3000
+        if ("download" in lower) score -= 2000
+        if (lower.endsWith(".m3u8")) score += 1000
+        if (lower.endsWith(".mpd")) score += 900
+        if (lower.endsWith(".mp4")) score += 800
+        if (lower.contains("2160") || lower.contains("4k")) score += 40
+        else if (lower.contains("1440")) score += 35
+        else if (lower.contains("1080")) score += 30
+        else if (lower.contains("720")) score += 20
+        else if (lower.contains("480")) score += 10
+        return score
+    }
+
+    private suspend fun getPage(url: String): PageFetch? {
+        val normalized = url.trim()
+        if (normalized.isBlank()) return null
+
+        val candidates = linkedSetOf<String>()
+        candidates.add(normalized)
+        if (normalized.startsWith("https://", true)) {
+            candidates.add("http://" + normalized.removePrefix("https://"))
+        } else if (normalized.startsWith("http://", true)) {
+            candidates.add("https://" + normalized.removePrefix("http://"))
+        }
+
+        for (candidate in candidates) {
+            val page = runCatching {
+                val response = app.get(candidate, headers = pageHeaders(candidate))
+                PageFetch(
+                    document = response.document,
+                    responseHeaders = mapOf(
+                        "Set-Cookie" to (response.headers["Set-Cookie"] ?: ""),
+                        "ETag" to (response.headers["ETag"] ?: "")
+                    ).filterValues { it.isNotBlank() }
+                )
+            }.getOrNull()
+            if (page != null) return page
+        }
+        return null
+    }
+
+    private suspend fun getDocument(url: String): Document? = getPage(url)?.document
+
+    private fun pagedUrl(base: String, page: Int): String {
+        val clean = base.substringBefore("#")
+        if (page <= 1 && !clean.contains("page=", true)) return clean
+        val separator = if (clean.contains("?")) "&" else "?"
+        val withoutPage = clean.replace(Regex("([&?])page=\\d+"), "")
+        val sep = if (withoutPage.contains("?")) "&" else "?"
+        return "$withoutPage${sep}page=$page"
+    }
+
+    private fun detectNextPage(document: Document, page: Int): Boolean {
+        val next = document.select(
+            "a[href*='page=${page + 1}'], a[rel='next'], a:matchesOwn((?i)^Next$)"
+        )
+        return next.isNotEmpty()
+    }
+
+    private fun extractContentUrl(element: Element): String? {
+        val attrs = listOf(
+            element.attr("href"),
+            element.attr("data-href"),
+            element.attr("data-url"),
+            element.attr("data-link"),
+            element.attr("onclick")
+        )
+
+        for (raw in attrs) {
+            if (raw.isBlank()) continue
+            val extracted = extractUrlFromAttribute(raw) ?: raw
+            if (extracted.isBlank()) continue
+            if (
+                extracted.contains("tview.php", true) ||
+                extracted.contains("player.php", true) ||
+                extracted.contains("download.php", true) ||
+                extracted.contains("view.php", true)
+            ) {
+                return extracted
+            }
+        }
+        return null
+    }
+
+    private fun extractUrlFromAttribute(value: String): String? {
+        val patterns = listOf(
+            Regex("[\\\"']((?:https?://|/|\\.\\.?/)[^\\\"']+)[\\\"']"),
+            Regex("(?i)(?:location\\.href|window\\.location|openMovie|openSeries)\\s*\\(?[\\\"']?([^\\\"')]+)")
+        )
+        for (pattern in patterns) {
+            pattern.find(value)?.groupValues?.getOrNull(1)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findCard(element: Element): Element? {
+        return element.closest(".cp-card")
+            ?: element.closest(".movie-card")
+            ?: element.closest(".trend-card")
+            ?: element.closest("a[href]")
+    }
+
+    private fun extractCardTitle(element: Element, card: Element?): String {
+        val root = card ?: element
+        return sequenceOf(
+            root.selectFirst(".cp-title")?.text(),
+            root.attr("title").takeIf { it.isNotBlank() },
+            root.attr("aria-label").takeIf { it.isNotBlank() },
+            root.selectFirst("img[alt]")?.attr("alt"),
+            root.selectFirst("h1,h2,h3,h4,h5")?.text(),
+            element.text()
+        ).filterNotNull().map { it.trim() }.firstOrNull { it.isNotBlank() }.orEmpty()
+    }
+
+    private fun extractPoster(element: Element, baseUrl: String): String? {
+        val img = element.selectFirst(
+            "img[src], img[data-src], img[data-lazy-src], img[data-original], img[srcset]"
+        ) ?: return null
+
+        val candidates = buildList {
+            add(img.attr("src"))
+            add(img.attr("data-src"))
+            add(img.attr("data-lazy-src"))
+            add(img.attr("data-original"))
+            val srcset = img.attr("srcset")
+            if (srcset.isNotBlank()) {
+                add(srcset.substringBefore(',').trim().substringBefore(' '))
+            }
+        }
+
+        return candidates
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { absoluteUrl(it, baseUrl) }
+            .firstOrNull { it.isNotBlank() && !it.contains("dummyimage", true) && !it.startsWith("data:", true) }
+    }
+
+    private fun extractPageTitle(document: Document): String {
+        return sequenceOf(
+            document.selectFirst("h1")?.text(),
+            document.selectFirst(".title")?.text(),
+            document.selectFirst(".movie-title")?.text(),
+            document.selectFirst("title")?.text()
+        ).filterNotNull().map { cleanTitle(it) }.firstOrNull { it.isNotBlank() }.orEmpty()
+    }
+
+    private fun cleanTitle(value: String): String {
+        return value
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .removeSuffix(" • BAS PLAY")
+            .removeSuffix(" - Player")
+            .trim()
+    }
+
+    private fun titleFromUrl(url: String): String {
+        return runCatching {
+            val path = URI(url).path.orEmpty()
+            URLDecoder.decode(path.substringAfterLast('/'), StandardCharsets.UTF_8.toString())
+                .substringBeforeLast('.')
+                .replace(Regex("[_-]+"), " ")
+                .trim()
+        }.getOrDefault("Untitled")
+    }
+
+    private fun setQueryParam(url: String, key: String, value: String): String {
+        val clean = removeQueryParam(url, key)
+        val separator = if (clean.contains("?")) "&" else "?"
+        return "$clean${separator}${URLEncoder.encode(key, StandardCharsets.UTF_8.toString())}=${URLEncoder.encode(value, StandardCharsets.UTF_8.toString())}"
+    }
+
+    private fun removeQueryParam(url: String, key: String): String {
+        val hash = url.substringAfter("#", "")
+        val base = url.substringBefore("#")
+        val queryIndex = base.indexOf('?')
+        if (queryIndex < 0) return url
+        val path = base.substring(0, queryIndex)
+        val query = base.substring(queryIndex + 1)
+        val filtered = query.split('&')
+            .filter { it.isNotBlank() }
+            .filterNot { part -> part.substringBefore('=').equals(key, true) }
+        val rebuilt = if (filtered.isEmpty()) path else "$path?${filtered.joinToString("&")}"
+        return if (hash.isBlank()) rebuilt else "$rebuilt#$hash"
+    }
+
+    private fun absoluteUrl(raw: String, base: String): String {
+        val value = raw.trim().replace("&amp;", "&")
+        if (value.isBlank()) return ""
+        if (value.startsWith("http://", true) || value.startsWith("https://", true)) return value
+        val safeValue = value.replace(" ", "%20")
+        return runCatching { URI(base).resolve(safeValue).toString() }
+            .getOrElse { "$mainUrl/${safeValue.trimStart('/')}" }
+    }
+
+    private fun isUsefulContentUrl(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        if (lower.isBlank()) return false
+        if (lower.contains("javascript:")) return false
+        if (lower.contains("#")) return false
+        return lower.contains("tview.php") ||
+            lower.contains("player.php") ||
+            lower.contains("view.php")
+    }
+
+    private fun isSeriesUrl(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return lower.contains("tview.php") || lower.contains("tv.php")
+    }
+
+    private fun looksLikeSeriesPage(document: Document): Boolean {
+        return document.select(
+            "[class*=episode], [id*=episode], [class*=season], [id*=season], a[href*=tview.php]"
+        ).isNotEmpty()
+    }
+
+    private fun isPlayableOrPlayerUrl(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return lower.contains("player.php") || lower.contains("watch.php") || isPlayableMedia(lower)
+    }
+
+    private fun looksLikePlayerOrContentPage(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return lower.contains("player.php") || lower.contains("tview.php") || lower.contains("view.php") || lower.contains("download.php")
+    }
+
+    private fun isPlayableMedia(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT).substringBefore("?")
+        return lower.endsWith(".m3u8") ||
+            lower.endsWith(".mpd") ||
+            lower.endsWith(".mp4") ||
+            lower.endsWith(".mkv") ||
+            lower.endsWith(".webm") ||
+            lower.endsWith(".mov") ||
+            lower.endsWith(".m4v") ||
+            lower.endsWith(".avi") ||
+            lower.endsWith(".flv") ||
+            lower.endsWith(".ts")
+    }
+
+    private fun isMediaUrl(url: String): Boolean = isPlayableMedia(url)
+
+    private fun isTrailerUrl(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return listOf("trailer", "teaser", "preview", "sample", "clip").any { it in lower }
+    }
+
+    private fun isDownloadOnlyUrl(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return lower.contains("download.php") && !isPlayableMedia(lower)
+    }
+
+    private fun extractDirectMediaFromElement(element: Element, baseUrl: String): String? {
+        val candidates = listOf(
+            element.attr("src"),
+            element.attr("data-src"),
+            element.attr("data-video"),
+            element.attr("data-file"),
+            element.attr("data-url"),
+            element.attr("data-source"),
+            element.attr("data-stream"),
+            element.attr("data-video-url"),
+            element.attr("data-manifest")
+        )
+        return candidates
+            .map { absoluteUrl(it, baseUrl) }
+            .firstOrNull { isPlayableMedia(it) && !isTrailerUrl(it) }
+    }
+
+    private fun extractPoster(document: Document, baseUrl: String): String? =
+        extractPoster(document.body(), baseUrl)
+
+    private fun itemKey(item: SiteItem): String = itemKeyFromUrl(item.url)
+
+    private fun itemKeyFromUrl(url: String): String {
+        return runCatching {
+            val uri = URI(url)
+            "${uri.host.orEmpty().lowercase(Locale.ROOT)}:${uri.path.orEmpty().lowercase(Locale.ROOT)}:${uri.query.orEmpty()}"
+        }.getOrDefault(url.lowercase(Locale.ROOT))
+    }
+
+    private fun mergeInterleaved(
+        first: List<SiteItem>,
+        second: List<SiteItem>
+    ): List<SiteItem> {
+        val out = mutableListOf<SiteItem>()
+        val max = maxOf(first.size, second.size)
+        for (index in 0 until max) {
+            first.getOrNull(index)?.let(out::add)
+            second.getOrNull(index)?.let(out::add)
+        }
+        return out
+    }
+
+    private fun movieDedupeKey(item: SiteItem): String {
+        val normalizedTitle = normalizeSearch(item.title)
+        if (normalizedTitle.isNotBlank()) return "movie:title:$normalizedTitle"
+        return "movie:url:${itemKey(item)}"
+    }
+
+    private fun searchScore(query: String, title: String): Double {
+        val q = normalizeSearch(query)
+        val t = normalizeSearch(title)
+        if (q.isBlank() || t.isBlank()) return 0.0
+        if (q == t) return 1.0
+        if (t.contains(q)) return 0.96
+
+        val qTokens = q.split(' ').filter { it.length >= 2 }
+        val tTokens = t.split(' ').filter { it.length >= 2 }
+        if (qTokens.isEmpty() || tTokens.isEmpty()) return 0.0
+
+        val tokenScore = qTokens.map { qt ->
+            tTokens.maxOfOrNull { tt ->
+                when {
+                    tt == qt -> 1.0
+                    tt.startsWith(qt) || qt.startsWith(tt) -> 0.90
+                    else -> similarity(qt, tt)
+                }
+            } ?: 0.0
+        }.average()
+
+        return tokenScore.coerceIn(0.0, 1.0)
+    }
+
+    private fun normalizeSearch(value: String): String =
+        value.lowercase(Locale.ROOT)
+            .replace("&", " and ")
+            .replace(Regex("[^a-z0-9\\p{L}]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private fun similarity(a: String, b: String): Double {
+        if (a == b) return 1.0
+        if (a.isBlank() || b.isBlank()) return 0.0
+        val distance = levenshtein(a, b)
+        return 1.0 - distance.toDouble() / maxOf(a.length, b.length)
+    }
+
+    private fun levenshtein(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+        var prev = IntArray(b.length + 1) { it }
+        var curr = IntArray(b.length + 1)
+        for (i in a.indices) {
+            curr[0] = i + 1
+            for (j in b.indices) {
+                val cost = if (a[i] == b[j]) 0 else 1
+                curr[j + 1] = minOf(
+                    curr[j] + 1,
+                    prev[j + 1] + 1,
+                    prev[j] + cost
+                )
+            }
+            val tmp = prev
+            prev = curr
+            curr = tmp
+        }
+        return prev[b.length]
+    }
+
+    private fun inferTvType(url: String): TvType =
+        if (isSeriesUrl(url)) TvType.TvSeries else TvType.Movie
+
+    private fun encodeToken(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
+
+    private fun decodeToken(value: String): String =
+        runCatching {
+            URLDecoder.decode(value, StandardCharsets.UTF_8.toString())
+        }.getOrDefault(value)
+
+    private fun extractSeasonNumber(text: String, url: String): Int? {
+        val source = "$text $url"
+        val match = Regex("(?i)(?:season|s)[ ._-]*(\\d{1,2})").find(source)
+        return match?.groupValues?.getOrNull(1)?.toIntOrNull()
+    }
+
+    private fun extractEpisodeNumber(text: String, url: String): Int? {
+        val source = "$text $url"
+        val patterns = listOf(
+            Regex("(?i)(?:episode|ep|e)[ ._-]*(\\d{1,4})"),
+            Regex("(?i)s\\d{1,2}e(\\d{1,4})")
+        )
+        return patterns.asSequence()
+            .mapNotNull { it.find(source)?.groupValues?.lastOrNull()?.toIntOrNull() }
+            .firstOrNull()
+    }
+
+    private fun isNavigationTitle(title: String): Boolean {
+        return title.equals("next", true) ||
+            title.equals("previous", true) ||
+            title.equals("home", true) ||
+            title.equals("movies", true) ||
+            title.equals("tv", true) ||
+            title.equals("anime", true)
+    }
+}
