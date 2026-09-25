@@ -14,6 +14,7 @@ cloudstream {
     )
 
     language = "bn"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/DhakaFTP/icon.svg"
 }
 
 /*
