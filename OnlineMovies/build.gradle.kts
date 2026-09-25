@@ -5,7 +5,7 @@ plugins {
 }
 
 cloudstream {
-    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "msujoy149/Movie-Flick")
+    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "MyselfHumayunShariarHimu/MovieCloud")
     iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/OnlineMovies/icon.svg"
 }
 
