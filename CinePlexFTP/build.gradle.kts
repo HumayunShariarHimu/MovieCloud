@@ -29,7 +29,7 @@ cloudstream {
         "Anime"
     )
     language = "bn"
-    iconUrl = "https://cineplexbd.net/favicon.png?v=2"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/CinePlexFTP/icon.svg"
     isCrossPlatform = true
 }
 
