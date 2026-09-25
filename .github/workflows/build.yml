@@ -54,7 +54,7 @@ jobs:
             cp -f "$jar" "$OUT/$provider.jar"
           done < <(find "$SRC" -type f -path "*/build/libs/*.jar" | sort)
           cp -f "$SRC/build/plugins.json" "$OUT/plugins.json"
-          printf '%s\n' '{' '  "name": "MovieCloud",' '  "description": "MovieCloud CloudStream Extensions",' '  "manifestVersion": 1,' '  "pluginLists": [' "    \"https://raw.githubusercontent.com/\${GITHUB_REPOSITORY}/builds/plugins.json\"" '  ]' '}' > "$OUT/repo.json"
+          printf '%s\n' '{' '  "name": "MovieCloud",' '  "description": "MovieCloud CloudStream Extensions",' '  "manifestVersion": 1,' '  "pluginLists": [' "    \"https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/plugins.json\"" '  ]' '}' > "$OUT/repo.json"
           MOVIEBOX_HASH="sha256-$(sha256sum "$OUT/MovieBox.cs3" | cut -d" " -f1)"
           MOVIEBOX_SIZE="$(wc -c < "$OUT/MovieBox.cs3" | tr -d " ")"
           MOVIEBOX_URL="https://raw.githubusercontent.com/\${GITHUB_REPOSITORY}/builds/MovieBox.cs3"
