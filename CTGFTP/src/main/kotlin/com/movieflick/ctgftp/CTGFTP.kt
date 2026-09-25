@@ -997,4 +997,1002 @@ class CTGFTP : MainAPI() {
         val subtitleTracks: List<CtgSubtitleTrack>
     )
 
-    /*
+    /*     * Extract CTG's serialized links[] payload from the Next.js response.
+     *
+     * A series/watch response may contain several links[] arrays because CTG
+     * serializes episode data and its related objects into the page. Therefore
+     * we inspect every top-level links[] array and, when the caller gives us
+     * an episode/movie id, keep only links belonging to that target.
+     */
+    private data class EpisodeDataPayload(
+        val episodeId: String,
+        val watchUrl: String,
+        val sources: List<CtgPlaybackSource>
+    )
+
+    private fun episodeCacheKey(
+        seriesSlug: String?,
+        episodeId: String
+    ): String {
+        return if (seriesSlug.isNullOrBlank()) {
+            episodeId
+        } else {
+            "${seriesSlug.lowercase(Locale.ROOT)}::$episodeId"
+        }
+    }
+
+    private suspend fun emitEpisodeSources(
+        sources: List<CtgPlaybackSource>,
+        referer: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        var emitted = false
+        val subtitleSeen = linkedSetOf<String>()
+
+        sources.distinctBy { mediaDedupKey(it.url) }.forEach { source ->
+            if (!isMediaUrl(source.url)) return@forEach
+
+            source.subtitleTracks.forEach { track ->
+                if (subtitleSeen.add(track.url)) {
+                    subtitleCallback(
+                        newSubtitleFile(
+                            lang = track.label.ifBlank {
+                                track.language.ifBlank { "Subtitle" }
+                            },
+                            url = track.url
+                        )
+                    )
+                }
+            }
+
+            emitMediaLink(
+                mediaUrl = source.url,
+                referer = referer,
+                qualityHint = source.quality,
+                sourceName = source.sourceName,
+                language = source.language,
+                includeLanguage = true,
+                callback = callback
+            )
+            emitted = true
+        }
+
+        return emitted
+    }
+
+    private suspend fun loadExactWatchSources(
+        input: String,
+        episodeId: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val response = runCatching {
+            app.get(
+                input,
+                headers = pageHeaders + ("Referer" to "$mainUrl/")
+            )
+        }.getOrNull() ?: return false
+
+        val targetId = episodeId?.takeIf { it.isNotBlank() }
+            ?: watchId(input)
+
+        // PRIMARY EPISODE RESOLUTION:
+        // Read the authoritative allEpisodes[] object and select the exact
+        // episode by id. This mirrors the movie flow but guarantees that the
+        // selected episode can never receive a sibling episode source.
+        val ctgSources = extractEpisodeSourcesFromAllEpisodes(
+            html = response.text,
+            baseUrl = input,
+            episodeId = targetId
+        ).ifEmpty {
+            // FALLBACK: keep the existing targeted links[] resolver for older
+            // or structurally different CTG watch responses.
+            extractCtgPlaybackLinks(
+                html = response.text,
+                baseUrl = input,
+                preferredEpisodeId = targetId
+            )
+        }
+
+        if (ctgSources.isEmpty()) {
+            /*
+             * Direct media fallback is intentionally restricted to this exact
+             * watch page. It never scans sibling episodes.
+             */
+            val direct = extractMediaUrls(
+                document = response.document,
+                html = response.text,
+                baseUrl = input
+            ).distinctBy { mediaDedupKey(it) }
+
+            if (direct.isEmpty()) return false
+
+            direct.forEach { source ->
+                emitMediaLink(
+                    mediaUrl = source,
+                    referer = input,
+                    callback = callback
+                )
+            }
+            return true
+        }
+
+        var emitted = false
+        val subtitleSeen = linkedSetOf<String>()
+
+        ctgSources.forEach { source ->
+            val mediaUrl = source.url
+            if (!isMediaUrl(mediaUrl)) return@forEach
+
+            source.subtitleTracks.forEach { track ->
+                if (subtitleSeen.add(track.url)) {
+                    subtitleCallback(
+                        newSubtitleFile(
+                            lang = track.label.ifBlank {
+                                track.language.ifBlank { "Subtitle" }
+                            },
+                            url = track.url
+                        )
+                    )
+                }
+            }
+
+            emitMediaLink(
+                mediaUrl = mediaUrl,
+                referer = input,
+                qualityHint = source.quality,
+                sourceName = source.sourceName,
+                language = source.language,
+                includeLanguage = true,
+                callback = callback
+            )
+            emitted = true
+        }
+
+        return emitted
+    }
+
+    private fun buildEpisodeDataPayload(
+        episodeId: String,
+        watchUrl: String,
+        sources: List<CtgPlaybackSource>
+    ): String {
+        val sourcePart = sources
+            .distinctBy { mediaDedupKey(it.url) }
+            .joinToString(SOURCE_SEPARATOR) { source ->
+                listOf(
+                    source.url,
+                    source.quality.orEmpty(),
+                    source.sourceName.orEmpty(),
+                    source.language.orEmpty(),
+                    serializeSubtitleTracks(source.subtitleTracks)
+                ).joinToString(SOURCE_FIELD_SEPARATOR) { field ->
+                    encodeDataField(field)
+                }
+            }
+
+        return EPISODE_DATA_PREFIX +
+            encodeDataField(episodeId) + "|" +
+            encodeDataField(watchUrl) + "|" +
+            sourcePart
+    }
+
+    private fun parseEpisodeDataPayload(
+        payload: String
+    ): EpisodeDataPayload {
+        val parts = payload.split(
+            '|',
+            limit = 4
+        )
+
+        val episodeId = decodeDataField(
+            parts.getOrNull(1).orEmpty()
+        )
+
+        val watchUrl = decodeDataField(
+            parts.getOrNull(2).orEmpty()
+        )
+
+        val sourcePart = parts.getOrNull(3).orEmpty()
+        val sources = sourcePart
+            .split(SOURCE_SEPARATOR)
+            .filter { it.isNotBlank() }
+            .mapNotNull { encodedSource ->
+                val fields = encodedSource.split(
+                    SOURCE_FIELD_SEPARATOR,
+                    limit = 5
+                )
+
+                val url = decodeDataField(
+                    fields.getOrNull(0).orEmpty()
+                )
+
+                if (!isMediaUrl(url)) return@mapNotNull null
+
+                CtgPlaybackSource(
+                    url = url,
+                    quality = decodeDataField(
+                        fields.getOrNull(1).orEmpty()
+                    ).ifBlank { null },
+                    sourceName = decodeDataField(
+                        fields.getOrNull(2).orEmpty()
+                    ).ifBlank { null },
+                    language = decodeDataField(
+                        fields.getOrNull(3).orEmpty()
+                    ).ifBlank { null },
+                    episodeId = episodeId.ifBlank { null },
+                    movieId = null,
+                    subtitleTracks = deserializeSubtitleTracks(
+                        fields.getOrNull(4).orEmpty()
+                    )
+                )
+            }
+            .distinctBy { mediaDedupKey(it.url) }
+
+        return EpisodeDataPayload(
+            episodeId = episodeId,
+            watchUrl = watchUrl,
+            sources = sources
+        )
+    }
+
+    private fun serializeSubtitleTracks(
+        tracks: List<CtgSubtitleTrack>
+    ): String {
+        return tracks
+            .distinctBy { mediaDedupKey(it.url) }
+            .joinToString(SUBTITLE_SEPARATOR) { track ->
+                listOf(
+                    track.url,
+                    track.language,
+                    track.label
+                ).joinToString(SUBTITLE_FIELD_SEPARATOR) { field ->
+                    encodeDataField(field)
+                }
+            }
+    }
+
+    private fun deserializeSubtitleTracks(
+        value: String
+    ): List<CtgSubtitleTrack> {
+        if (value.isBlank()) return emptyList()
+
+        return value
+            .split(SUBTITLE_SEPARATOR)
+            .filter { it.isNotBlank() }
+            .mapNotNull { encodedTrack ->
+                val fields = encodedTrack.split(
+                    SUBTITLE_FIELD_SEPARATOR,
+                    limit = 3
+                )
+
+                val url = decodeDataField(
+                    fields.getOrNull(0).orEmpty()
+                )
+                if (url.isBlank()) return@mapNotNull null
+
+                CtgSubtitleTrack(
+                    url = url,
+                    language = decodeDataField(
+                        fields.getOrNull(1).orEmpty()
+                    ),
+                    label = decodeDataField(
+                        fields.getOrNull(2).orEmpty()
+                    )
+                )
+            }
+            .distinctBy { mediaDedupKey(it.url) }
+    }
+
+    private fun encodeDataField(
+        value: String
+    ): String {
+        return URLEncoder.encode(
+            value,
+            StandardCharsets.UTF_8.toString()
+        )
+    }
+
+    private fun decodeDataField(
+        value: String
+    ): String {
+        return runCatching {
+            URLDecoder.decode(
+                value,
+                StandardCharsets.UTF_8.toString()
+            )
+        }.getOrElse {
+            value
+        }
+    }
+
+    private fun extractCtgPlaybackLinks(
+        html: String,
+        baseUrl: String,
+        preferredEpisodeId: String? = null,
+        preferredMovieId: String? = null
+    ): List<CtgPlaybackSource> {
+        if (html.isBlank()) return emptyList()
+
+        /*
+         * CTG's watch response may contain many serialized links[] objects.
+         * The old movie resolver could take the first array because a movie
+         * has one target. TV/Anime needs one extra constraint: exact
+         * episode_id. We therefore locate the link object containing the
+         * selected id and read ONLY that object.
+         *
+         * This keeps the same actual movie playback path:
+         * watch page -> links object -> url/hls_url -> ExtractorLink.
+         */
+        val normalized = normalizeCtgPayload(html)
+        val targetId = preferredEpisodeId?.takeIf { it.isNotBlank() }
+            ?: preferredMovieId?.takeIf { it.isNotBlank() }
+
+        val result = mutableListOf<CtgPlaybackSource>()
+
+        fun addFromObject(objectText: String) {
+            val linkEpisodeId = extractJsonString(
+                objectText,
+                "episode_id"
+            )
+            val linkMovieId = extractJsonString(
+                objectText,
+                "movie_id"
+            )
+
+            if (!targetId.isNullOrBlank()) {
+                val matches = when {
+                    !preferredEpisodeId.isNullOrBlank() ->
+                        linkEpisodeId == preferredEpisodeId
+                    !preferredMovieId.isNullOrBlank() ->
+                        linkMovieId == preferredMovieId
+                    else -> true
+                }
+
+                if (!matches) return
+            }
+
+            val quality = extractJsonString(objectText, "quality")
+            val source = extractJsonString(objectText, "source")
+            val language = extractJsonString(objectText, "language")
+            val subtitles = extractSubtitleTracks(
+                objectText,
+                baseUrl
+            )
+
+            listOfNotNull(
+                extractJsonString(objectText, "url"),
+                extractJsonString(objectText, "hls_url")
+            ).forEach { raw ->
+                val media = absoluteUrl(
+                    cleanUrl(raw),
+                    baseUrl
+                )
+
+                if (isMediaUrl(media)) {
+                    result += CtgPlaybackSource(
+                        url = media,
+                        quality = quality,
+                        sourceName = source,
+                        language = language,
+                        episodeId = linkEpisodeId,
+                        movieId = linkMovieId,
+                        subtitleTracks = subtitles
+                    )
+                }
+            }
+        }
+
+        /*
+         * Fast exact lookup: every real CTG link object includes episode_id.
+         * This avoids scanning every links[] array and avoids resolution
+         * probing on unrelated episodes.
+         */
+        if (!targetId.isNullOrBlank()) {
+            val markerKey =
+                if (!preferredEpisodeId.isNullOrBlank()) {
+                    "episode_id"
+                } else {
+                    "movie_id"
+                }
+
+            val marker = "\"$markerKey\":\"$targetId\""
+            var from = 0
+
+            while (true) {
+                val markerIndex = normalized.indexOf(
+                    marker,
+                    from
+                )
+
+                if (markerIndex < 0) break
+
+                val objectStart = normalized.lastIndexOf(
+                    '{',
+                    markerIndex
+                )
+
+                if (objectStart >= 0) {
+                    val objectText = extractJsonObjectAt(
+                        normalized,
+                        objectStart
+                    )
+
+                    if (objectText != null) {
+                        addFromObject(objectText)
+                    }
+                }
+
+                from = markerIndex + marker.length
+            }
+        } else {
+            /*
+             * Movie fallback: preserve the original first-links-array behavior
+             * when no target id is supplied.
+             */
+            val arrays = extractJsonArraysAfterKey(
+                normalized,
+                "\"links\""
+            )
+
+            arrays.forEach { arrayText ->
+                extractTopLevelJsonObjects(
+                    arrayText
+                ).forEach(::addFromObject)
+            }
+        }
+
+        return result
+            .distinctBy { mediaDedupKey(it.url) }
+    }
+
+    private fun extractSubtitleTracks(
+        objectText: String,
+        baseUrl: String
+    ): List<CtgSubtitleTrack> {
+        val normalized = normalizeCtgPayload(objectText)
+        val arrays = extractJsonArraysAfterKey(
+            normalized,
+            "\"subtitle_tracks\""
+        )
+
+        if (arrays.isEmpty()) return emptyList()
+
+        val result = mutableListOf<CtgSubtitleTrack>()
+
+        arrays.forEach { arrayText ->
+            extractTopLevelJsonObjects(arrayText).forEach { trackObject ->
+                val rawUrl = extractJsonString(
+                    trackObject,
+                    "url"
+                ) ?: return@forEach
+
+                val url = absoluteUrl(
+                    cleanUrl(rawUrl),
+                    baseUrl
+                )
+
+                if (
+                    url.isNotBlank() &&
+                    (
+                        url.startsWith("http://", true) ||
+                            url.startsWith("https://", true)
+                    )
+                ) {
+                    result.add(
+                        CtgSubtitleTrack(
+                            url = url,
+                            language = extractJsonString(
+                                trackObject,
+                                "language"
+                            ).orEmpty(),
+                            label = extractJsonString(
+                                trackObject,
+                                "label"
+                            ).orEmpty()
+                        )
+                    )
+                }
+            }
+        }
+
+        val seen = linkedSetOf<String>()
+        return result.filter { seen.add(it.url) }
+    }
+
+    private fun normalizeCtgPayload(
+        html: String
+    ): String {
+        var value = html
+
+        // Some captured/serialized Next.js payloads contain a second escape
+        // layer. Two passes handle both one-level and double-level escaping
+        // without affecting normal HTML attributes.
+        repeat(2) {
+            value = value
+                .replace("\\\"", "\"")
+                .replace("\\/", "/")
+                .replace("\\u0026", "&")
+                .replace("\\:", ":")
+                .replace("&amp;", "&")
+        }
+
+        return value
+    }
+
+    private fun extractJsonArraysAfterKey(
+        text: String,
+        key: String
+    ): List<String> {
+        if (text.isBlank()) return emptyList()
+
+        val result = mutableListOf<String>()
+        var searchFrom = 0
+
+        while (searchFrom < text.length) {
+            val keyIndex = text.indexOf(
+                key,
+                searchFrom
+            )
+
+            if (keyIndex < 0) break
+
+            val arrayStart = text.indexOf(
+                '[',
+                keyIndex + key.length
+            )
+
+            if (arrayStart < 0) break
+
+            var depth = 0
+            var inString = false
+            var escaped = false
+
+            for (index in arrayStart until text.length) {
+                val ch = text[index]
+
+                if (inString) {
+                    if (escaped) {
+                        escaped = false
+                    } else if (ch == '\\') {
+                        escaped = true
+                    } else if (ch == '"') {
+                        inString = false
+                    }
+                    continue
+                }
+
+                when (ch) {
+                    '"' -> inString = true
+
+                    '[' -> depth++
+
+                    ']' -> {
+                        depth--
+
+                        if (depth == 0) {
+                            result.add(
+                                text.substring(
+                                    arrayStart,
+                                    index + 1
+                                )
+                            )
+                            searchFrom = index + 1
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (searchFrom <= keyIndex) break
+        }
+
+        return result
+    }
+
+    private fun extractTopLevelJsonObjects(
+        arrayText: String
+    ): List<String> {
+        val result = mutableListOf<String>()
+
+        var depth = 0
+        var objectStart = -1
+        var inString = false
+        var escaped = false
+
+        for (index in arrayText.indices) {
+            val ch = arrayText[index]
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (ch == '\\') {
+                    escaped = true
+                } else if (ch == '"') {
+                    inString = false
+                }
+                continue
+            }
+
+            when (ch) {
+                '"' -> inString = true
+
+                '{' -> {
+                    if (depth == 0) {
+                        objectStart = index
+                    }
+                    depth++
+                }
+
+                '}' -> {
+                    if (depth > 0) {
+                        depth--
+
+                        if (
+                            depth == 0 &&
+                            objectStart >= 0
+                        ) {
+                            result.add(
+                                arrayText.substring(
+                                    objectStart,
+                                    index + 1
+                                )
+                            )
+                            objectStart = -1
+                        }
+                    }
+                }
+            }
+        }
+
+        return result
+    }
+
+    private fun extractJsonString(
+        objectText: String,
+        key: String
+    ): String? {
+        val marker = "\"$key\""
+        val keyIndex = objectText.indexOf(marker)
+        if (keyIndex < 0) return null
+
+        val colonIndex = objectText.indexOf(
+            ':',
+            keyIndex + marker.length
+        )
+        if (colonIndex < 0) return null
+
+        val valueStart = run {
+            var index = colonIndex + 1
+
+            while (
+                index < objectText.length &&
+                objectText[index].isWhitespace()
+            ) {
+                index++
+            }
+
+            index
+        }
+
+        if (
+            valueStart >= objectText.length ||
+            objectText[valueStart] != '"'
+        ) {
+            return null
+        }
+
+        val value = StringBuilder()
+        var escaped = false
+
+        for (
+            index in valueStart + 1 until objectText.length
+        ) {
+            val ch = objectText[index]
+
+            if (escaped) {
+                when (ch) {
+                    '"' -> value.append('"')
+                    '\\' -> value.append('\\')
+                    '/' -> value.append('/')
+                    'b' -> value.append('\b')
+                    'f' -> value.append('\u000C')
+                    'n' -> value.append('\n')
+                    'r' -> value.append('\r')
+                    't' -> value.append('\t')
+
+                    'u' -> {
+                        if (index + 4 < objectText.length) {
+                            val hex = objectText.substring(
+                                index + 1,
+                                index + 5
+                            )
+                            val decoded = hex.toIntOrNull(16)
+
+                            if (decoded != null) {
+                                value.append(
+                                    decoded.toChar()
+                                )
+                                escaped = false
+                                continue
+                            }
+                        }
+
+                        value.append('u')
+                    }
+
+                    else -> value.append(ch)
+                }
+
+                escaped = false
+                continue
+            }
+
+            when (ch) {
+                '\\' -> escaped = true
+                '"' -> return value.toString()
+                else -> value.append(ch)
+            }
+        }
+
+        return null
+    }
+
+    private fun extractJsonPrimitive(
+        objectText: String,
+        key: String
+    ): String? {
+        val marker = "\"$key\""
+        val keyIndex = objectText.indexOf(marker)
+        if (keyIndex < 0) return null
+
+        val colonIndex = objectText.indexOf(
+            ':',
+            keyIndex + marker.length
+        )
+        if (colonIndex < 0) return null
+
+        var start = colonIndex + 1
+        while (
+            start < objectText.length &&
+            objectText[start].isWhitespace()
+        ) {
+            start++
+        }
+
+        if (start >= objectText.length) return null
+
+        if (objectText[start] == '"') {
+            return extractJsonString(objectText, key)
+        }
+
+        var end = start
+        while (
+            end < objectText.length &&
+            objectText[end] !in charArrayOf(',', '}', ']') &&
+            !objectText[end].isWhitespace()
+        ) {
+            end++
+        }
+
+        return objectText
+            .substring(start, end)
+            .trim()
+            .takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    private suspend fun emitMediaLink(
+        mediaUrl: String,
+        referer: String,
+        qualityHint: String? = null,
+        sourceName: String? = null,
+        language: String? = null,
+        includeLanguage: Boolean = false,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val url = cleanUrl(mediaUrl)
+        if (!isMediaUrl(url)) return
+
+        val type = when {
+            url.contains(".m3u8", ignoreCase = true) ->
+                ExtractorLinkType.M3U8
+
+            url.contains(".mpd", ignoreCase = true) ->
+                ExtractorLinkType.DASH
+
+            else ->
+                ExtractorLinkType.VIDEO
+        }
+
+        val quality =
+            qualityFromHint(qualityHint)
+                ?: qualityFromUrl(
+                    buildString {
+                        append(url)
+                        if (!qualityHint.isNullOrBlank()) {
+                            append(' ')
+                            append(qualityHint)
+                        }
+                    }
+                )
+
+        val baseSuffix = when {
+            !sourceName.isNullOrBlank() ->
+                " ${sourceName.trim()}"
+
+            type == ExtractorLinkType.M3U8 ->
+                " HLS"
+
+            type == ExtractorLinkType.DASH ->
+                " DASH"
+
+            else ->
+                " Direct"
+        }
+
+        val languageSuffix =
+            if (
+                includeLanguage &&
+                !language.isNullOrBlank()
+            ) {
+                val normalizedLanguage =
+                    language
+                        .replace(
+                            Regex("""\s+"""),
+                            " "
+                        )
+                        .trim()
+
+                " [$normalizedLanguage]"
+            } else {
+                ""
+            }
+
+        callback(
+            newExtractorLink(
+                source = name,
+                name = "$name$baseSuffix$languageSuffix",
+                url = url,
+                type = type
+            ) {
+                this.referer = referer
+                this.quality = quality
+            }
+        )
+    }
+
+    private suspend fun getDocument(url: String): Document? {
+        val normalized = cleanUrl(url)
+        if (normalized.isBlank()) return null
+
+        return runCatching {
+            app.get(
+                normalized,
+                headers = pageHeaders + ("Referer" to "$mainUrl/")
+            ).document
+        }.getOrNull()
+    }
+
+    private fun parseItems(
+        document: Document,
+        sourceUrl: String
+    ): List<SiteItem> {
+        val result = linkedMapOf<String, SiteItem>()
+
+        val sourcePath = runCatching {
+            URI(sourceUrl).path.orEmpty()
+                .lowercase(Locale.ROOT)
+        }.getOrDefault("")
+
+        val expectedPrefix = when {
+            sourcePath.startsWith("/movies") -> "/movies/"
+            sourcePath.startsWith("/tv") -> "/tv/"
+            sourcePath.startsWith("/anime") -> "/anime/"
+            else -> null
+        }
+
+        fun addItem(
+            rawUrl: String?,
+            card: Element,
+            fallbackElement: Element? = null
+        ) {
+            if (rawUrl.isNullOrBlank()) return
+
+            val absolute = absoluteUrl(
+                cleanUrl(rawUrl),
+                sourceUrl
+            )
+            val canonical = canonicalContentUrl(absolute)
+            val canonicalPath = runCatching {
+                URI(canonical).path.orEmpty()
+                    .lowercase(Locale.ROOT)
+            }.getOrDefault("")
+
+            if (
+                !isContentUrl(canonical) ||
+                (expectedPrefix != null &&
+                    !canonicalPath.startsWith(expectedPrefix))
+            ) {
+                return
+            }
+
+            val title = cleanTitle(
+                firstNonBlank(
+                    card.selectFirst(".title")?.text(),
+                    card.selectFirst(".movie-title")?.text(),
+                    card.selectFirst(".movie_name")?.text(),
+                    card.selectFirst(".name")?.text(),
+                    card.selectFirst("img")?.attr("alt"),
+                    card.selectFirst("h1")?.text(),
+                    card.selectFirst("h2")?.text(),
+                    card.selectFirst("h3")?.text(),
+                    card.selectFirst("h4")?.text(),
+                    fallbackElement?.attr("aria-label"),
+                    fallbackElement?.text(),
+                    titleFromUrl(canonical)
+                )
+            )
+
+            if (title.isBlank() || isNavigationTitle(title)) return
+
+            result.putIfAbsent(
+                canonical,
+                SiteItem(
+                    title = title,
+                    url = canonical,
+                    poster = extractPosterFromElement(
+                        card,
+                        sourceUrl
+                    ),
+                    type = typeFromUrl(canonical)
+                )
+            )
+        }
+
+        /*
+         * First parse fully materialized cards.
+         * CTG's server response also contains streamed placeholder anchors; those
+         * are handled in the second pass below.
+         */
+        document.select(
+            "a[href], [data-href], [data-url], [data-link]"
+        ).forEach { element ->
+            val raw = sequenceOf(
+                element.attr("href"),
+                element.attr("data-href"),
+                element.attr("data-url"),
+                element.attr("data-link")
+            ).firstOrNull { it.isNotBlank() }
+                ?: return@forEach
+
+            if (element.selectFirst("img") == null) {
+                return@forEach
+            }
+
+            addItem(
+                rawUrl = raw,
+                card = element,
+                fallbackElement = element
+            )
+        }
+
+        /*
+         * CTG/Next.js may stream a card as: placeholder anchor P:x + hidden S:y
+         * fragments + $RS("S:y","P:x"). Rebuild those fragments so items such
+         * as Heer Sara are not assigned the previous card's title/thumbnail.
+         */
+        val rsMappings = linkedMapOf<String, MutableList<String>>()
+        val rsRegex = Regex(
+            """${'$'}RS\("([^"]+)","([^"]+)"\)"""
+        )
+
+        document.select("script").forEach { script ->
+            rsRegex.findAll(script.data()).forEach { match ->
+                val sourceId = match.groupValues[1]
+                val targetId = match.groupValues[2]
+                rsMappings
+                    .getOrPut(targetId) { mutableListOf() }
+                    .add(sourceId)
+            }
+        }
