@@ -57,7 +57,7 @@ jobs:
           printf '%s\n' '{' '  "name": "MovieCloud",' '  "description": "MovieCloud CloudStream Extensions",' '  "manifestVersion": 1,' '  "pluginLists": [' "    \"https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/plugins.json\"" '  ]' '}' > "$OUT/repo.json"
           MOVIEBOX_HASH="sha256-$(sha256sum "$OUT/MovieBox.cs3" | cut -d" " -f1)"
           MOVIEBOX_SIZE="$(wc -c < "$OUT/MovieBox.cs3" | tr -d " ")"
-          MOVIEBOX_URL="https://raw.githubusercontent.com/\${GITHUB_REPOSITORY}/builds/MovieBox.cs3"
+          MOVIEBOX_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/MovieBox.cs3"
           jq --arg hash "$MOVIEBOX_HASH" --arg url "$MOVIEBOX_URL" --argjson size "$MOVIEBOX_SIZE" 'map(select((.internalName // "") != "MovieBox" and (.internalName // "") != "MovieBoxProvider" and (.internalName // "") != "MovieBoxProviderIN")) + [{"iconUrl":"https://github.com/NivinCNC/CNCVerse-Cloud-Stream-Extension/raw/refs/heads/master/Logos/MovieBoxProvider/icon.png","fileHash":$hash,"apiVersion":1,"repositoryUrl":("https://github.com/"+env.GITHUB_REPOSITORY),"fileSize":$size,"status":1,"language":"hi","authors":["NivinCNC","MovieCloud"],"tvTypes":["Movie","TvSeries"],"version":52,"internalName":"MovieBox","description":"Multi Language Movies and Series Provider","url":$url,"name":"MovieBox"}]' "$OUT/plugins.json" > "$OUT/plugins.json.tmp"
           mv "$OUT/plugins.json.tmp" "$OUT/plugins.json"
           python3 - "$OUT" > "$OUT/artifact-index.json" <<'PY'
