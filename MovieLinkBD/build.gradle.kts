@@ -14,7 +14,7 @@ cloudstream {
     language = "bn"
     iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MovieLinkBD/icon.svg"
     isCrossPlatform = true
-    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "msujoy149/Movie-Flick")
+    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "MyselfHumayunShariarHimu/MovieCloud")
 }
 
 android {
