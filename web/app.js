@@ -113,46 +113,61 @@ function showJarHelp(name){
  document.body.classList.add("modal-open");
 }
 
-function youtubeId(value){
- const v=String(value||"").trim();
- if(!v)return null;
- const patterns=[/[?&]v=([A-Za-z0-9_-]{6,})/,/youtu\.be\/([A-Za-z0-9_-]{6,})/,/youtube\.com\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{6,})/];
- for(const re of patterns){const m=v.match(re);if(m)return m[1];}
- return /^[A-Za-z0-9_-]{6,}$/.test(v)?v:null;
+function directMediaUrl(value){
+  const v=String(value||"").trim();
+  if(!v)return null;
+  try{
+    const u=new URL(v);
+    if(!["http:","https:"].includes(u.protocol))return null;
+    return u.href;
+  }catch{return null;}
 }
 
 function openStreaming(name){
- ensureModal();
- const cfg=streamFor(name);
- $("#streamTitle").textContent=name+" · Streaming";
- $("#streamSubtitle").textContent=cfg?"Browser streaming workspace":"No verified public browser endpoint configured for this provider.";
- if(!cfg){
-   $("#streamBody").innerHTML='<div class="info-panel"><div class="info-icon">WEB</div><h3>Provider endpoint is not publicly configured</h3>'+
-   '<p>The CloudStream provider can still work through its published CS3 package. A stable public browser endpoint was not added here because the source does not expose one.</p>'+
-   '<div class="info-actions"><a class="btn primary" href="'+sourceFor(name)+'" target="_blank" rel="noopener noreferrer">Open source ↗</a></div></div>';
- }else if(cfg.mode==="youtube"){
-   $("#streamBody").innerHTML='<div class="youtube-tools"><div class="tool-card"><label for="videoInput">YouTube video / Shorts / live URL or video ID</label>'+
-   '<div class="inline-form"><input id="videoInput" type="text" placeholder="Paste a YouTube URL or ID"><button id="loadVideo" class="btn primary" type="button">Watch</button></div>'+
-   '<div class="quick-links"><a href="'+cfg.url+'" target="_blank" rel="noopener noreferrer">Browse ↗</a><a href="'+cfg.url+'/live" target="_blank" rel="noopener noreferrer">Live ↗</a><a href="'+cfg.url+'/results?search_query=movies" target="_blank" rel="noopener noreferrer">Search ↗</a></div></div></div>'+
-   '<div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Paste a video URL above to load the official YouTube player.</p></div></div>'+
-   '<div class="viewer-footer"><a class="btn ghost" href="'+cfg.url+'" target="_blank" rel="noopener noreferrer">Open externally ↗</a><span>Playback uses YouTube’s official embed player.</span></div>';
-   $("#loadVideo").addEventListener("click",()=>{
-     const id=youtubeId($("#videoInput").value);
-     if(!id){$("#videoInput").focus();$("#videoInput").classList.add("input-error");return;}
-     $("#videoInput").classList.remove("input-error");
-     $("#playerShell").innerHTML='<iframe class="player-frame" src="https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&playsinline=1&rel=0" title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
-   });
- }else{
-   $("#streamBody").innerHTML='<div class="viewer-toolbar"><div><b>'+esc(cfg.label)+'</b><span>'+esc(cfg.url)+'</span></div>'+
-   '<div class="viewer-actions"><button class="btn ghost" id="reloadFrame" type="button">Reload</button><a class="btn primary" href="'+cfg.url+'" target="_blank" rel="noopener noreferrer">Open externally ↗</a></div></div>'+
-   '<div class="browser-note"><b>Browser limitation:</b> some providers block iframe embedding with X-Frame-Options/CSP, use HTTP, or require a local/ISP network. If the viewer is blank, use <b>Open externally</b>.</div>'+
-   '<div class="web-viewer"><iframe id="providerFrame" src="'+cfg.url+'" title="'+esc(cfg.label)+' browser viewer" loading="eager" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-presentation"></iframe></div>'+
-   '<div class="viewer-footer"><a class="btn ghost" href="'+cfg.url+'" target="_blank" rel="noopener noreferrer">Open '+esc(cfg.label)+' ↗</a><span>MovieCloud does not proxy or bypass provider security restrictions.</span></div>';
-   $("#reloadFrame").addEventListener("click",()=>{const f=$("#providerFrame");if(f)f.src=cfg.url;});
- }
- $("#streamModal").hidden=false;
- document.body.classList.add("modal-open");
- setTimeout(()=>$(".modal-close")?.focus(),0);
+  ensureModal();
+  const cfg=streamFor(name);
+  $("#streamTitle").textContent=name+" · Media Player";
+  $("#streamSubtitle").textContent="Direct HLS/MP4 playback through the project's allowlisted media gateway.";
+
+  $("#streamBody").innerHTML='<div class="tool-card">'+
+    '<label for="mediaInput">Authorized direct media URL (HLS .m3u8 or MP4)</label>'+
+    '<div class="inline-form"><input id="mediaInput" type="url" placeholder="https://your-domain.example/video.m3u8">'+
+    '<button id="loadMedia" class="btn primary" type="button">Play</button></div>'+
+    '<div class="quick-links">'+
+      (cfg?.url?'<a href="'+esc(cfg.url)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':"")+
+      '<span>Only allowlisted/authorized media hosts are relayed.</span>'+
+    '</div></div>'+
+    '<div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Enter an authorized HLS or MP4 URL to start playback.</p></div></div>'+
+    '<div class="browser-note"><b>Server gateway:</b> MovieCloud no longer loads provider pages in an iframe. The Vercel Function relays media bytes only for domains explicitly configured in <code>ALLOWED_STREAM_HOSTS</code>, preserving Range requests for seeking.</div>'+
+    '<div class="viewer-footer"><span>For sources you own or are authorized to relay.</span></div>';
+
+  $("#loadMedia").addEventListener("click",()=>{
+    const media=directMediaUrl($("#mediaInput").value);
+    if(!media){
+      $("#mediaInput").focus();
+      $("#mediaInput").classList.add("input-error");
+      return;
+    }
+    $("#mediaInput").classList.remove("input-error");
+    const gateway="/api/stream?url="+encodeURIComponent(media);
+    const ext=media.split("?")[0].toLowerCase();
+    const type=ext.endsWith(".m3u8")?"application/x-mpegURL":"video/mp4";
+    $("#playerShell").innerHTML='<video class="player-frame native-player" controls playsinline preload="metadata" crossorigin="anonymous">'+
+      '<source src="'+esc(gateway)+'" type="'+type+'">'+
+      'Your browser does not support HTML5 video.</video>'+
+      '<div class="player-error" hidden></div>';
+    const video=$("#playerShell video");
+    video.play().catch(()=>{});
+    video.addEventListener("error",()=>{
+      const e=$("#playerShell .player-error");
+      e.hidden=false;
+      e.textContent="Playback failed. Check that the source is a direct HLS/MP4 URL and its host is configured in Vercel ALLOWED_STREAM_HOSTS.";
+    });
+  });
+
+  $("#streamModal").hidden=false;
+  document.body.classList.add("modal-open");
+  setTimeout(()=>$(".modal-close")?.focus(),0);
 }
 
 function closeStreaming(){
