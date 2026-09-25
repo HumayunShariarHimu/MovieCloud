@@ -9,5 +9,6 @@ cloudstream {
         "TvSeries"
     )
     language = "bn"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MovieBox/icon.svg"
     isCrossPlatform = true
 }
