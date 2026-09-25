@@ -17,7 +17,7 @@ cloudstream {
     status = 1
     tvTypes = listOf("Other","TvSeries")
     language = "bn-IN"
-    iconUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fb/YouTube_Kids_LogoVector.svg/512px-YouTube_Kids_LogoVector.svg.png"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/YouTubeKids/icon.svg"
     isCrossPlatform = true
 }
 
