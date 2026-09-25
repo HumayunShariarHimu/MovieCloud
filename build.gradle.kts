@@ -18,7 +18,7 @@ subprojects {
  apply(plugin="com.android.library")
  apply(plugin="kotlin-android")
  apply(plugin="com.lagradost.cloudstream3.gradle")
- cloudstream { setRepo(System.getenv("GITHUB_REPOSITORY") ?: "msujoy149/Movie-Flick") }
+ cloudstream { setRepo(System.getenv("GITHUB_REPOSITORY") ?: "MyselfHumayunShariarHimu/MovieCloud") }
  android {
   namespace="com.movieflick"
   defaultConfig { minSdk=21; compileSdkVersion(35); targetSdk=35 }
