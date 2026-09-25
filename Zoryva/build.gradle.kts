@@ -10,7 +10,7 @@ cloudstream {
     status = 1
     tvTypes = listOf("Movie","TvSeries","Anime")
     language = "hi"
-    iconUrl = "https://zoryva.me/icon-512.png"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/Zoryva/icon.svg"
     isCrossPlatform = true
     setRepo(System.getenv("GITHUB_REPOSITORY") ?: "msujoy149/Movie-Flick")
 }
