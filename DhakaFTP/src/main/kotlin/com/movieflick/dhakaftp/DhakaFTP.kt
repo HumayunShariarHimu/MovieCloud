@@ -997,4 +997,1003 @@ class DhakaFTP : MainAPI() {
             .find(
                 normalized
             )
-            ?.groupValues
+            ?.groupValues            ?.getOrNull(1)
+            ?.toIntOrNull()
+            ?.let {
+                return it
+            }
+
+        return Int.MAX_VALUE
+    }
+
+    private suspend fun loadDynamicTvPage(
+        rootRaw: String,
+        page: Int,
+        pageSize: Int
+    ): List<FtpGroup> {
+
+        val root =
+            normalizeDirectoryUrl(
+                rootRaw
+            )
+
+        val state =
+            dynamicTvCursors.computeIfAbsent(
+                root
+            ) {
+                DynamicTvCursor(
+                    root = root
+                )
+            }
+
+        state.pages[page]?.let {
+            return it
+        }
+
+        if (!state.initialized) {
+
+            val entries =
+                safeDirectoryEntries(
+                    root,
+                    1600L
+                )
+
+            state.initialized = true
+
+            if (
+                entries.isEmpty()
+            ) {
+                state.exhausted = true
+                state.pages[page] =
+                    emptyList()
+                return emptyList()
+            }
+
+            entries
+                .filter {
+                    it.isDirectory
+                }
+                .sortedWith(
+                    latestLiveFolderComparator()
+                )
+                .forEach {
+                    state.queue.addLast(it)
+                }
+        }
+
+        val found =
+            mutableListOf<FtpGroup>()
+
+        while (
+            found.size <
+                pageSize &&
+            !state.exhausted
+        ) {
+
+            if (
+                state.queue.isEmpty()
+            ) {
+                state.exhausted = true
+                break
+            }
+
+            val orderedQueue =
+                state.queue
+                    .toList()
+                    .sortedWith(
+                        latestLiveFolderComparator()
+                    )
+
+            state.queue.clear()
+
+            orderedQueue.forEach {
+                state.queue.addLast(it)
+            }
+
+            val batch =
+                mutableListOf<FtpEntry>()
+
+            repeat(
+                minOf(
+                    pageSize,
+                    state.queue.size
+                )
+            ) {
+                batch.add(
+                    state.queue.removeFirst()
+                )
+            }
+
+            val fetched =
+                coroutineScope {
+                    batch.map {
+                        candidate ->
+                        async {
+
+                            val folder =
+                                normalizeDirectoryUrl(
+                                    candidate.url
+                                )
+
+                            val entries =
+                                safeDirectoryEntries(
+                                    folder,
+                                    1900L
+                                )
+
+                            val poster =
+                                pickPoster(
+                                    entries
+                                )
+
+                            val seasons =
+                                entries
+                                    .filter {
+                                        it.isDirectory &&
+                                            isSeasonDirectory(
+                                                it.name
+                                            )
+                                    }
+                                    .sortedWith(
+                                        compareByDescending<FtpEntry> {
+                                            it.modifiedAt
+                                                ?: 0L
+                                        }.thenByDescending {
+                                            extractSeasonNumber(
+                                                it.name
+                                            ) ?: 0
+                                        }
+                                    )
+
+                            val directEpisodes =
+                                entries
+                                    .filter {
+                                        it.isVideo
+                                    }
+                                    .sortedBy {
+                                        episodeSortKey(
+                                            it.name
+                                        )
+                                    }
+
+                            val seasonCards =
+                                seasons.map {
+                                    seasonEntry ->
+
+                                    val season =
+                                        extractSeasonNumber(
+                                            seasonEntry.name
+                                        ) ?: 1
+
+                                    val seasonUrl =
+                                        normalizeDirectoryUrl(
+                                            seasonEntry.url
+                                        )
+
+                                    if (
+                                        poster != null
+                                    ) {
+                                        posterCache[
+                                            seasonUrl
+                                        ] =
+                                            poster
+                                    }
+
+                                    FtpGroup(
+                                        title =
+                                            "${
+                                                getFolderTitle(
+                                                    folder
+                                                )
+                                            } Season $season",
+                                        url =
+                                            seasonUrl,
+                                        posterUrl =
+                                            poster,
+                                        modifiedAt =
+                                            seasonEntry.modifiedAt
+                                                ?: 0L,
+                                        videos =
+                                            emptyList(),
+                                        kind =
+                                            ContentKind.SERIES,
+                                        isSeasonCard =
+                                            true,
+                                        seasonNumber =
+                                            season
+                                    )
+                                }
+
+                            val directSeries =
+                                if (
+                                    seasonCards.isEmpty() &&
+                                    directEpisodes.isNotEmpty()
+                                ) {
+
+                                    val videos =
+                                        directEpisodes.mapIndexed {
+                                            index,
+                                            entry ->
+                                            makeVideo(
+                                                entry =
+                                                    entry,
+                                                poster =
+                                                    poster,
+                                                seasonHint =
+                                                    1,
+                                                order =
+                                                    index.toLong()
+                                            )
+                                        }
+
+                                    FtpGroup(
+                                        title =
+                                            "${
+                                                getFolderTitle(
+                                                    folder
+                                                )
+                                            } Season 1",
+                                        url =
+                                            folder,
+                                        posterUrl =
+                                            poster,
+                                        modifiedAt =
+                                            maxOf(
+                                                candidate.modifiedAt
+                                                    ?: 0L,
+                                                directEpisodes.maxOfOrNull {
+                                                    it.modifiedAt
+                                                        ?: 0L
+                                                } ?: 0L
+                                            ),
+                                        videos =
+                                            videos,
+                                        kind =
+                                            ContentKind.SERIES,
+                                        isSeasonCard =
+                                            true,
+                                        seasonNumber =
+                                            1
+                                    )
+                                } else {
+                                    null
+                                }
+
+                            /*
+                             * Wrapper/year/category folder:
+                             * continue deeper automatically.
+                             */
+                            val children =
+                                if (
+                                    seasonCards.isEmpty() &&
+                                    directEpisodes.isEmpty()
+                                ) {
+                                    entries
+                                        .filter {
+                                            it.isDirectory
+                                        }
+                                        .sortedWith(
+                                            latestLiveFolderComparator()
+                                        )
+                                } else {
+                                    emptyList()
+                                }
+
+                            Triple(
+                                seasonCards,
+                                directSeries,
+                                children
+                            )
+                        }
+                    }.awaitAll()
+                }
+
+            fetched.forEach {
+                (seasonCards,
+                 directSeries,
+                 children) ->
+
+                children.forEach {
+                    child ->
+                    state.queue.addLast(
+                        child
+                    )
+                }
+
+                val candidates =
+                    if (
+                        seasonCards.isNotEmpty()
+                    ) {
+                        seasonCards
+                    } else {
+                        directSeries?.let {
+                            listOf(it)
+                        }.orEmpty()
+                    }
+
+                /*
+                 * Within one source cursor, keep one latest card per
+                 * logical show. Older seasons stay searchable.
+                 */
+                candidates
+                    .sortedWith(
+                        compareByDescending<FtpGroup> {
+                            it.modifiedAt
+                        }.thenByDescending {
+                            it.seasonNumber
+                                ?: 0
+                        }
+                    )
+                    .forEach {
+                        card ->
+
+                        val key =
+                            logicalTvShowHomeKey(
+                                card
+                            )
+
+                        if (
+                            state.emitted.add(
+                                key
+                            )
+                        ) {
+                            found.add(
+                                card
+                            )
+                        }
+                    }
+            }
+        }
+
+        val final =
+            collapseLatestTvAcrossSources(
+                found
+            )
+                .sortedWith(
+                    tvHomeComparator()
+                )
+                .take(
+                    pageSize
+                )
+
+        state.pages[page] =
+            final
+
+        return final
+    }
+
+    private suspend fun waitForPartialIndex(
+        root: String,
+        requiredCount: Int,
+        maxWaitMs: Long
+    ) {
+
+        val start =
+            System.currentTimeMillis()
+
+        while (
+            System.currentTimeMillis() -
+                start <
+            maxWaitMs
+        ) {
+
+            val cached =
+                validCache(root)
+
+            if (
+                cached != null &&
+                (
+                    cached.complete ||
+                        cached.groups.size >=
+                        requiredCount
+                    )
+            ) {
+                return
+            }
+
+            kotlinx.coroutines.delay(
+                60L
+            )
+        }
+    }
+
+    /*
+     * Locate the logical show folder above a Season folder without making
+     * any network request. This keeps Season 1/2/3 under one show key even
+     * when a source inserts a non-Season wrapper directory.
+     */
+    private fun findLogicalShowRoot(
+        seasonUrlRaw: String
+    ): String? {
+
+        var current =
+            normalizeDirectoryUrl(
+                seasonUrlRaw
+            )
+
+        repeat(5) {
+
+            val parent =
+                parentDirectory(
+                    current
+                ) ?: return null
+
+            val title =
+                getFolderTitle(
+                    parent
+                )
+
+            if (
+                !isSeasonDirectory(
+                    title
+                )
+            ) {
+                return parent
+            }
+
+            current =
+                parent
+        }
+
+        return null
+    }
+
+    private fun latestSeasonPerShow(
+        groups: List<FtpGroup>
+    ): List<FtpGroup> {
+
+        /*
+         * TV homepage rule:
+         * - if a show has Season folders, show ONLY its newest Season card
+         * - older Seasons remain searchable
+         * - if no Season folder exists, keep its direct-episode show card
+         */
+        val seasonCards =
+            groups.filter {
+                it.kind == ContentKind.SERIES &&
+                    it.isSeasonCard
+            }
+
+        val latestByShow =
+            LinkedHashMap<String, FtpGroup>()
+
+        seasonCards.forEach { card ->
+
+            val showRoot =
+                normalizeDirectoryUrl(
+                    findLogicalShowRoot(
+                        card.url
+                    ) ?: (
+                        parentDirectory(card.url)
+                            ?: card.url
+                    )
+                )
+
+            val existing =
+                latestByShow[showRoot]
+
+            if (
+                existing == null ||
+                card.modifiedAt > existing.modifiedAt ||
+                (
+                    card.modifiedAt == existing.modifiedAt &&
+                    (card.seasonNumber ?: 0) >
+                        (existing.seasonNumber ?: 0)
+                )
+            ) {
+                latestByShow[showRoot] = card
+            }
+        }
+
+        val seasonShowRoots =
+            latestByShow.keys.map {
+                normalizeDirectoryUrl(it)
+            }.toSet()
+
+        val fallback =
+            groups.filter { group ->
+
+                if (
+                    group.kind != ContentKind.SERIES ||
+                    group.isSeasonCard
+                ) {
+                    true
+                } else {
+                    normalizeDirectoryUrl(group.url) !in
+                        seasonShowRoots
+                }
+            }
+
+        return (latestByShow.values + fallback)
+            .distinctBy {
+                it.url.lowercase(Locale.getDefault())
+            }
+            .sortedWith(groupComparator())
+    }
+
+    private suspend fun getInitialGroups(
+        root: String,
+        limit: Int
+    ): List<FtpGroup> {
+
+        val cached =
+            validCache(root)
+
+        if (
+            cached?.groups?.isNotEmpty() == true
+        ) {
+            return cached.groups.take(limit)
+        }
+
+        /*
+         * Collect a few extra candidates because duplicate filtering or
+         * latest-season collapsing may remove some of them.
+         */
+        val probeLimit =
+            maxOf(limit, limit * 2)
+
+        val initial =
+            if (
+                detectKind(root) == ContentKind.SERIES
+            ) {
+                fastTvBootstrap(
+                    root,
+                    probeLimit
+                )
+            } else {
+                fastMovieBootstrap(
+                    root,
+                    probeLimit
+                )
+            }
+
+        if (
+            initial.isNotEmpty()
+        ) {
+            updatePartialCache(
+                root,
+                initial
+            )
+        }
+
+        return initial.take(limit)
+    }
+
+
+
+    private fun collapseLatestTvAcrossSources(
+        groups: List<FtpGroup>
+    ): List<FtpGroup> {
+
+        val latestByShow =
+            LinkedHashMap<String, FtpGroup>()
+
+        /*
+         * Home-only TV dedup:
+         * one logical show -> one Home card.
+         *
+         * Use the actual show-folder identity, not the rendered title.
+         * This prevents duplicate SWAT cards when two source folders use
+         * slightly different display metadata.
+         *
+         * Choose the newest Season by modification time; season number breaks
+         * equal timestamps. Older seasons remain searchable.
+         */
+        groups
+            .filter {
+                it.kind == ContentKind.SERIES
+            }
+            .forEach { card ->
+
+                val key =
+                    logicalTvShowHomeKey(
+                        card
+                    )
+
+                val current =
+                    latestByShow[key]
+
+                if (
+                    current == null ||
+                    tvCardIsNewer(
+                        card,
+                        current
+                    )
+                ) {
+                    latestByShow[key] =
+                        card
+                }
+            }
+
+        return latestByShow.values
+            .sortedWith(
+                tvHomeComparator()
+            )
+    }
+
+    private fun logicalTvShowKey(
+        titleRaw: String
+    ): String {
+
+        var value =
+            normalizeSearchText(
+                titleRaw
+            )
+
+        value =
+            value.replace(
+                Regex(
+                    "(?i)\\bseason\\s*\\d{1,3}\\b"
+                ),
+                " "
+            )
+
+        value =
+            value.replace(
+                Regex(
+                    "(?i)\\bS\\d{1,3}\\b"
+                ),
+                " "
+            )
+
+        value =
+            value.replace(
+                Regex(
+                    "(?i)\\b(tv\\s*series|tv\\s*show|series)\\b"
+                ),
+                " "
+            )
+
+        value =
+            value.replace(
+                Regex(
+                    "\\[[^]]*]"
+                ),
+                " "
+            )
+
+        value =
+            value.replace(
+                Regex(
+                    "\\([^)]*\\)"
+                ),
+                " "
+            )
+
+        value =
+            value.replace(
+                Regex(
+                    "\\s+"
+                ),
+                " "
+            )
+            .trim()
+
+        return compactSearchText(
+            value
+        )
+    }
+
+    private fun tvCardIsNewer(
+        candidate: FtpGroup,
+        current: FtpGroup
+    ): Boolean {
+
+        if (
+            candidate.modifiedAt !=
+            current.modifiedAt
+        ) {
+            return candidate.modifiedAt >
+                current.modifiedAt
+        }
+
+        return (
+            candidate.seasonNumber
+                ?: 0
+        ) >
+            (
+                current.seasonNumber
+                    ?: 0
+            )
+    }
+
+    private fun tvHomeComparator():
+        Comparator<FtpGroup> {
+
+        return compareByDescending<FtpGroup> {
+            it.modifiedAt
+        }
+            .thenByDescending {
+                it.seasonNumber
+                    ?: 0
+            }
+            .thenBy {
+                it.title.lowercase(
+                    Locale.getDefault()
+                )
+            }
+    }
+
+    private fun mixThreeAndThree(
+        first: List<FtpGroup>,
+        second: List<FtpGroup>
+    ): List<FtpGroup> {
+
+        val result =
+            mutableListOf<FtpGroup>()
+
+        var a = 0
+        var b = 0
+
+        while (
+            a < first.size ||
+            b < second.size
+        ) {
+
+            repeat(
+                TV_SOURCE_BATCH
+            ) {
+                if (
+                    a < first.size
+                ) {
+                    result.add(
+                        first[a++]
+                    )
+                }
+            }
+
+            repeat(
+                TV_SOURCE_BATCH
+            ) {
+                if (
+                    b < second.size
+                ) {
+                    result.add(
+                        second[b++]
+                    )
+                }
+            }
+        }
+
+        return result
+    }
+
+    /*
+     * ---------------------------------------------------------------
+     * SEARCH
+     * ---------------------------------------------------------------
+     */
+
+
+    override suspend fun search(
+        query: String,
+        page: Int
+    ): SearchResponseList {
+
+        val normalizedQuery =
+            normalizeSearchText(
+                query
+            )
+
+        if (
+            normalizedQuery.isBlank()
+        ) {
+            return newSearchResponseList(
+                emptyList(),
+                false
+            )
+        }
+
+        /*
+         * TMDB-FIRST SEARCH:
+         *
+         * 1. Ask TMDB for the best media identity first.
+         * 2. Route to the most likely DhakaFTP branch.
+         * 3. Search the targeted branch before touching the legacy engine.
+         * 4. If TMDB is unavailable, returns no usable identity, or the routed
+         *    branches do not contain the title, fall back to the old search.
+         *
+         * IMPORTANT:
+         * A valid TMDB response with zero results is NOT treated as an API
+         * credential failure. Credential rotation only happens for actual
+         * request/API failures inside TmdbHelper.
+         */
+        val tmdbOutcome =
+            TmdbHelper.search(
+                normalizedQuery
+            )
+
+        if (
+            tmdbOutcome.isApiUsable &&
+                tmdbOutcome.items.isNotEmpty()
+        ) {
+
+            val smartResults =
+                searchByTmdbRouting(
+                    query = normalizedQuery,
+                    tmdbItems = tmdbOutcome.items
+                )
+
+            if (
+                smartResults.isNotEmpty()
+            ) {
+                return paginateSearchResults(
+                    smartResults,
+                    page
+                )
+            }
+        }
+
+        /*
+         * HARD SAFETY FALLBACK:
+         *
+         * TMDB outage, quota exhaustion, invalid credentials, timeout, or
+         * a routed search miss must never break DhakaFTP search.
+         * The existing legacy engine remains the final source of truth.
+         */
+        return legacySearch(
+            normalizedQuery,
+            page
+        )
+    }
+
+    private suspend fun searchByTmdbRouting(
+        query: String,
+        tmdbItems: List<TmdbMedia>
+    ): List<NativeSearchResult> {
+
+        val candidates =
+            tmdbItems
+                .take(3)
+
+        val candidateResults =
+            coroutineScope {
+                candidates
+                    .map { media ->
+                        async {
+                            val roots =
+                                when (media.mediaType) {
+                                    TmdbMediaType.MOVIE ->
+                                        movieRootsForTmdb(
+                                            media
+                                        )
+
+                                    TmdbMediaType.TV ->
+                                        tvRootsForTmdb(
+                                            media
+                                        )
+                                }
+
+                            if (
+                                media.mediaType ==
+                                TmdbMediaType.MOVIE
+                            ) {
+                                searchMovieTmdbCandidate(
+                                    query = query,
+                                    media = media,
+                                    roots = roots
+                                )
+                            } else {
+                                searchTvTmdbCandidate(
+                                    query = query,
+                                    media = media,
+                                    roots = roots
+                                )
+                            }
+                        }
+                    }
+                    .awaitAll()
+                    .flatten()
+            }
+
+        return candidateResults
+            .filter {
+                maxOf(
+                    scoreSearchCandidate(
+                        query,
+                        it.title
+                    ),
+                    searchTitleFromNativeResult(
+                        it,
+                        query
+                    )
+                ) >= SEARCH_MIN_RESULT_SCORE
+            }
+            .sortedWith(
+                compareByDescending<NativeSearchResult> {
+                    /*
+                     * Exact/near-exact user-query matches outrank a broader
+                     * related TMDB result such as "Doom at Your Service" when
+                     * the query is simply "Doom".
+                     */
+                    scoreSearchCandidate(
+                        query,
+                        it.title
+                    )
+                }
+                    .thenByDescending {
+                        it.score
+                    }
+                    .thenByDescending {
+                        it.modifiedAt
+                    }
+                    .thenBy {
+                        it.title.lowercase(
+                            Locale.ROOT
+                        )
+                    }
+            )
+            .distinctBy {
+                it.url.lowercase(
+                    Locale.ROOT
+                )
+            }
+    }
+
+    private fun searchTitleFromNativeResult(
+        result: NativeSearchResult,
+        query: String
+    ): Int {
+        return maxOf(
+            scoreSearchCandidate(
+                query,
+                result.title
+            ),
+            scoreSearchCandidate(
+                compactSearchText(query),
+                compactSearchText(result.title)
+            )
+        )
+    }
+
+    private suspend fun searchMovieTmdbCandidate(
+        query: String,
+        media: TmdbMedia,
+        roots: List<String>
+    ): List<NativeSearchResult> {
+
+        val orderedRoots =
+            roots
+                .distinct()
+                .take(4)
+
+        /*
+         * Satyajit Ray has a dedicated Kolkata collection. When TMDB confirms
+         * the director, try that collection first. If the collection misses,
+         * the normal Kolkata/year route is still attempted.
+         */
+        val specialRoots =
+            if (
+                media.isSatyajitRay
+            ) {
+                findSpecialCollectionRoots(
+                    ROOT_KOLKATA,
+                    listOf(
+                        "Satyajit Ray Films",
+                        "Satyajit Ray"
+                    )
+                )
+            } else {
+                emptyList()
+            }
+
+        val firstRoots =
+            specialRoots +
+                orderedRoots
+
+        firstRoots
+            .distinct()
+            .forEach { root ->
+
+                val targetRoot =
+                    resolveMovieTargetRoot(
+                        categoryRoot = root,
+                        year = media.year
+                    )
+
+                val searchRoots =
+                    listOf(
+                        targetRoot,
+                        normalizeDirectoryUrl(
+                            root
+                        )
