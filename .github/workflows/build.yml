@@ -21,6 +21,13 @@ jobs:
         run: sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: "8.11.1"}
+      - name: Build CloudStream Gradle plugin locally
+        run: |
+          set -euo pipefail
+          rm -rf "$GITHUB_WORKSPACE/cloudstream-gradle"
+          git clone --depth 1 --branch master https://github.com/recloudstream/gradle.git "$GITHUB_WORKSPACE/cloudstream-gradle"
+          cd "$GITHUB_WORKSPACE/cloudstream-gradle"
+          ./gradlew publishToMavenLocal --no-daemon
       - name: Build plugins
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
