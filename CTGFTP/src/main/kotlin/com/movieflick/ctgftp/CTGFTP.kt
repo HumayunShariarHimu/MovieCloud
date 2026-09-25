@@ -1996,3 +1996,1837 @@ class CTGFTP : MainAPI() {
                     .add(sourceId)
             }
         }
+        document.select("template[id^=P:]").forEach { template ->
+            val targetId = template.id()
+            val sourceIds = rsMappings[targetId]
+                ?.distinct()
+                .orEmpty()
+
+            if (sourceIds.isEmpty()) return@forEach
+
+            var parent: Element? = template.parent()
+            while (parent != null && parent?.tagName() != "a") {
+                parent = parent.parent()
+            }
+
+            val anchor = parent ?: return@forEach
+            val raw = sequenceOf(
+                anchor.attr("href"),
+                anchor.attr("data-href"),
+                anchor.attr("data-url"),
+                anchor.attr("data-link")
+            ).firstOrNull { it.isNotBlank() }
+                ?: return@forEach
+
+            val fragments = sourceIds.mapNotNull { sourceId ->
+                document.getElementById(sourceId)?.html()
+            }
+
+            if (fragments.isEmpty()) return@forEach
+
+            val fragmentDocument = org.jsoup.Jsoup.parseBodyFragment(
+                fragments.joinToString("\n")
+            )
+
+            addItem(
+                rawUrl = raw,
+                card = fragmentDocument.body(),
+                fallbackElement = anchor
+            )
+        }
+
+        return result.values.toList()
+    }
+
+    private fun SiteItem.toSearchResponse(): SearchResponse {
+        return when (type) {
+            TvType.TvSeries -> newTvSeriesSearchResponse(
+                title,
+                url,
+                TvType.TvSeries
+            ) {
+                posterUrl = poster
+            }
+
+            TvType.Anime -> newAnimeSearchResponse(
+                title,
+                url,
+                TvType.Anime
+            ) {
+                posterUrl = poster
+            }
+
+            else -> newMovieSearchResponse(
+                title,
+                url,
+                TvType.Movie
+            ) {
+                posterUrl = poster
+            }
+        }
+    }
+
+    /*
+     * Find CTG's actual playback page from a movie/series/anime detail page.
+     *
+     * The supplied CTG source shows the Movie Play button using:
+     *   href="/watch/<id>?type=movie"
+     *
+     * We use the DOM link instead of a giant regex.
+     */
+    private fun extractPlaybackPageUrl(
+        document: Document,
+        baseUrl: String
+    ): String? {
+        val elements = document.select(
+            "a[href], [data-href], [data-url]"
+        )
+
+        /*
+         * Prefer an explicit Play/Watch link.
+         */
+        for (element in elements) {
+            val raw = sequenceOf(
+                element.attr("href"),
+                element.attr("data-href"),
+                element.attr("data-url")
+            ).firstOrNull { it.isNotBlank() } ?: continue
+
+            val absolute = absoluteUrl(
+                cleanUrl(raw),
+                baseUrl
+            )
+
+            val path = runCatching {
+                URI(absolute).path.orEmpty().lowercase(Locale.ROOT)
+            }.getOrElse {
+                absolute.lowercase(Locale.ROOT)
+            }
+
+            val label = element.text()
+                .trim()
+                .lowercase(Locale.ROOT)
+
+            if (
+                path.startsWith("/watch/") &&
+                (
+                    label.contains("play") ||
+                    label.contains("watch") ||
+                    absolute.contains("type=movie", true) ||
+                    absolute.contains("type=series", true) ||
+                    absolute.contains("type=tv", true) ||
+                    absolute.contains("type=anime", true)
+                )
+            ) {
+                return absolute
+            }
+        }
+
+        /*
+         * Fallback for buttons/links whose visible label is rendered by JS.
+         */
+        for (element in elements) {
+            val raw = sequenceOf(
+                element.attr("href"),
+                element.attr("data-href"),
+                element.attr("data-url")
+            ).firstOrNull { it.isNotBlank() } ?: continue
+
+            val absolute = absoluteUrl(
+                cleanUrl(raw),
+                baseUrl
+            )
+
+            val path = runCatching {
+                URI(absolute).path.orEmpty().lowercase(Locale.ROOT)
+            }.getOrElse {
+                absolute.lowercase(Locale.ROOT)
+            }
+
+            if (path.startsWith("/watch/")) {
+                return absolute
+            }
+        }
+
+        return null
+    }
+
+    private fun parseEpisodes(
+        document: Document,
+        rawHtml: String,
+        baseUrl: String
+    ): List<Episode> {
+        val result = linkedMapOf<String, Episode>()
+
+        /*
+         * ============================================================
+         * PASS 1 — REAL EPISODE CARDS FROM THE CTG HTML
+         * ============================================================
+         *
+         * CTG's episode cards contain:
+         *   - S01E01
+         *   - air date
+         *   - runtime
+         *   - Episode N
+         *   - overview/plot
+         *   - still/poster
+         *   - /watch/<episode-id>?type=episode&series=<slug>
+         *
+         * Parse those cards directly instead of treating the first media
+         * file on the page as "Episode 1".
+         */
+        document.select("section").forEach { section ->
+            val heading = section.selectFirst("h2")
+                ?.text()
+                ?.trim()
+                ?.lowercase(Locale.ROOT)
+                ?: return@forEach
+
+            if (heading != "episodes") {
+                return@forEach
+            }
+
+            section.select("li").forEach { item ->
+                val anchor = item.selectFirst(
+                    "a[href]"
+                ) ?: return@forEach
+
+                val raw = anchor.attr("href")
+                    .trim()
+
+                val absolute = absoluteUrl(
+                    cleanUrl(raw),
+                    baseUrl
+                )
+
+                if (!isEpisodeWatchUrl(absolute)) {
+                    return@forEach
+                }
+
+                val infoText = item
+                    .selectFirst(
+                        ".font-mono"
+                    )
+                    ?.text()
+                    ?.trim()
+                    .orEmpty()
+
+                val seasonEpisodeText =
+                    sequenceOf(
+                        infoText,
+                        item.text()
+                    ).firstOrNull {
+                        Regex(
+                            """(?i)\bS\d{1,2}\s*E\d{1,3}\b"""
+                        ).containsMatchIn(it)
+                    }
+                        .orEmpty()
+
+                val season =
+                    seasonNumber(
+                        item,
+                        absolute
+                    )
+
+                val episode =
+                    episodeNumber(
+                        item,
+                        absolute
+                    )
+
+                val title = cleanTitle(
+                    firstNonBlank(
+                        item.selectFirst("h4")?.text(),
+                        item.selectFirst("h3")?.text(),
+                        anchor.text(),
+                        "Episode $episode"
+                    )
+                )
+
+                val description =
+                    item.selectFirst("p")
+                        ?.text()
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+
+                val poster =
+                    item.selectFirst(
+                        "img[src], img[data-src], " +
+                            "img[data-poster]"
+                    )?.let { image ->
+                        firstNonBlank(
+                            image.attr("data-poster"),
+                            image.attr("data-src"),
+                            image.attr("src")
+                        ).takeIf {
+                            it.isNotBlank()
+                        }?.let {
+                            absoluteUrl(
+                                it,
+                                baseUrl
+                            )
+                        }
+                    }
+
+                val airDate =
+                    Regex(
+                        """\b(\d{4}-\d{2}-\d{2})\b"""
+                    )
+                        .find(
+                            sequenceOf(
+                                infoText,
+                                item.text()
+                            ).joinToString(" ")
+                        )
+                        ?.groupValues
+                        ?.getOrNull(1)
+
+                val runTime =
+                    Regex(
+                        """\b(\d+)\s*m\b"""
+                    )
+                        .find(
+                            sequenceOf(
+                                infoText,
+                                item.text()
+                            ).joinToString(" ")
+                        )
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toIntOrNull()
+
+                addEpisode(
+                    result = result,
+                    dataUrl = absolute,
+                    name = title,
+                    season = season,
+                    episode = episode,
+                    posterUrl = poster,
+                    description = description,
+                    airDate = airDate,
+                    runTime = runTime
+                )
+            }
+        }
+
+        /*
+         * ============================================================
+         * PASS 2 — NEXT.JS `allEpisodes` SERIALIZED DATA
+         * ============================================================
+         *
+         * This is the authoritative dynamic backup. CTG serializes all
+         * episodes here even when the DOM shell is incomplete while the page
+         * is streaming. It gives us the exact episode count, ids, overview,
+         * still URL, season/episode numbers and runtime.
+         */
+        val seriesSlug = seriesSlugFromUrl(baseUrl)
+        val serialized = parseSerializedEpisodes(
+            /*
+             * IMPORTANT: use the original response body, not document.html().
+             * CTG's streamed Next.js payload contains the authoritative
+             * allEpisodes + links objects, and the original response preserves
+             * the escape structure needed by the parser.
+             */
+            html = rawHtml.ifBlank { document.html() },
+            baseUrl = baseUrl,
+            seriesSlug = seriesSlug
+        )
+
+        serialized.forEach { episodeData ->
+            addEpisode(
+                result = result,
+                dataUrl = episodeData.dataUrl,
+                name = episodeData.name,
+                season = episodeData.season,
+                episode = episodeData.episode,
+                posterUrl = episodeData.posterUrl,
+                description = episodeData.description,
+                airDate = episodeData.airDate,
+                runTime = episodeData.runTime,
+                playbackSources = episodeData.playbackSources
+            )
+        }
+
+        /*
+         * Only if CTG exposes no structured episode data at all do we keep the
+         * old single-media fallback. This prevents a broken/empty series UI
+         * while preserving compatibility with unusual pages.
+         */
+        if (result.isEmpty()) {
+            val media = extractMediaUrls(
+                document,
+                document.html(),
+                baseUrl
+            ).firstOrNull()
+
+            if (media != null) {
+                result[media] = newEpisode(media) {
+                    name = "Episode 1"
+                    season = 1
+                    episode = 1
+                }
+            }
+        }
+
+        return result.values.sortedWith(
+            compareBy<Episode> {
+                it.season ?: 1
+            }
+                .thenBy {
+                    it.episode ?: Int.MAX_VALUE
+                }
+        )
+    }
+
+    private data class ParsedEpisode(
+        val dataUrl: String,
+        val name: String,
+        val season: Int,
+        val episode: Int,
+        val posterUrl: String?,
+        val description: String?,
+        val airDate: String?,
+        val runTime: Int?,
+        val playbackSources: List<CtgPlaybackSource>
+    )
+
+    private fun addEpisode(
+        result: MutableMap<String, Episode>,
+        dataUrl: String,
+        name: String,
+        season: Int,
+        episode: Int,
+        posterUrl: String?,
+        description: String?,
+        airDate: String?,
+        runTime: Int?,
+        playbackSources: List<CtgPlaybackSource> = emptyList()
+    ) {
+        val cleanData = cleanUrl(dataUrl)
+        if (cleanData.isBlank()) return
+
+        /*
+         * A CTG episode can be discovered twice:
+         *
+         *   1) from the rendered <li> card (watch URL only), and
+         *   2) from Next.js `allEpisodes[]` (authoritative episode object + links[]).
+         *
+         * The previous implementation keyed the map by the complete data URL.
+         * That meant the DOM version was already present, so the richer
+         * serialized version was discarded by putIfAbsent(). The CloudStream
+         * Episode therefore kept only the watch URL and loadLinks() later had
+         * to rediscover the media source, causing "No Links Found" on episodes
+         * whose playable links only exist inside serialized `links[]`.
+         *
+         * Episode number + season are the stable identity here. When the
+         * serialized record arrives, it replaces the shell record so its
+         * exact source payload is cached and reused by loadLinks().
+         */
+        val existingKey = result.keys.firstOrNull { key ->
+            key.startsWith("$season:$episode:")
+        }
+
+        /*
+         * Put the exact episode source payload into Episode.data.
+         *
+         * This follows the same final playback concept as the working movie
+         * path: the selected Episode carries its concrete media URL(s).
+         * Therefore loadLinks() does not depend on an in-memory cache surviving
+         * between the series detail screen and the player.
+         *
+         * If CTG has one or more links[] entries, serialize those exact
+         * episode sources here. Otherwise retain the exact watch URL as a
+         * runtime fallback.
+         */
+        /*
+         * Use the same data model as the original CTG implementation:
+         * the Episode carries its exact watch URL. The selected episode_id
+         * is recovered from that URL at Play time, so playback always starts
+         * from the same per-episode page that works in a browser.
+         *
+         * The rich episode metadata is still assigned below.
+         */
+        val episodeDataPayload = cleanData
+
+        val episodeData = newEpisode(episodeDataPayload) {
+            this.name = name.ifBlank {
+                "Episode $episode"
+            }
+            this.season = season
+            this.episode = episode
+            this.posterUrl = posterUrl
+            this.description = description
+            this.date = parseEpisodeDate(
+                airDate
+            )
+            this.runTime = runTime
+        }
+
+        /*
+         * Serialized `allEpisodes[]` is the authoritative episode record.
+         * When it contains one or more real links[], replace the lightweight
+         * DOM shell with the link-bearing episode data.
+         */
+        if (existingKey != null) {
+            // The serialized CTG episode record is authoritative for metadata.
+            // Always replace the lightweight DOM shell, even when links[] is
+            // temporarily absent in a partial response. Playback can still
+            // resolve the exact watch URL later.
+            result.remove(existingKey)
+        }
+
+        result[episodeIdentity(cleanData, season, episode)] = episodeData
+    }
+
+    private fun parseSerializedEpisodes(
+        html: String,
+        baseUrl: String,
+        seriesSlug: String?
+    ): List<ParsedEpisode> {
+        if (html.isBlank()) {
+            return emptyList()
+        }
+
+        val normalized = normalizeCtgPayload(
+            html
+        )
+
+        val arrays = extractJsonArraysAfterKey(
+            normalized,
+            "\"allEpisodes\""
+        )
+
+        if (arrays.isEmpty()) {
+            return emptyList()
+        }
+
+        val result = linkedMapOf<String, ParsedEpisode>()
+
+        arrays.forEach { arrayText ->
+            extractTopLevelJsonObjects(
+                arrayText
+            ).forEach { objectText ->
+                val season =
+                    extractJsonPrimitive(
+                        objectText,
+                        "season_number"
+                    )?.toIntOrNull()
+                        ?: return@forEach
+
+                val episode =
+                    extractJsonPrimitive(
+                        objectText,
+                        "episode_number"
+                    )?.toIntOrNull()
+                        ?: return@forEach
+
+                val id = extractJsonString(
+                    objectText,
+                    "id"
+                ) ?: return@forEach
+
+                val title =
+                    extractJsonString(
+                        objectText,
+                        "name"
+                    ).orEmpty().ifBlank {
+                        "Episode $episode"
+                    }
+
+                val description =
+                    extractJsonString(
+                        objectText,
+                        "overview"
+                    )?.takeIf {
+                        it.isNotBlank()
+                    }
+
+                val poster =
+                    extractJsonString(
+                        objectText,
+                        "still_url"
+                    )?.takeIf {
+                        it.isNotBlank()
+                    }?.let {
+                        absoluteUrl(
+                            cleanUrl(it),
+                            baseUrl
+                        )
+                    }
+
+                val airDate =
+                    extractJsonString(
+                        objectText,
+                        "air_date"
+                    )
+
+                val runTime =
+                    extractJsonPrimitive(
+                        objectText,
+                        "runtime"
+                    )?.toIntOrNull()
+
+                val watchUrl =
+                    buildEpisodeWatchUrl(
+                        episodeId = id,
+                        seriesSlug = seriesSlug
+                    )
+
+                val playbackSources =
+                    extractEpisodePlaybackSources(
+                        objectText = objectText,
+                        baseUrl = baseUrl,
+                        episodeId = id
+                    ).ifEmpty {
+                        extractEpisodePlaybackSourcesFast(
+                            html = normalized,
+                            baseUrl = baseUrl,
+                            episodeId = id
+                        )
+                    }
+
+                if (playbackSources.isNotEmpty()) {
+                    episodePlaybackCache[episodeCacheKey(seriesSlug, id)] =
+                        playbackSources
+                    episodePlaybackCache[id] = playbackSources
+                }
+
+                val dataUrl = watchUrl
+
+                val parsed = ParsedEpisode(
+                    dataUrl = dataUrl,
+                    name = cleanTitle(title),
+                    season = season,
+                    episode = episode,
+                    posterUrl = poster,
+                    description = description,
+                    airDate = airDate,
+                    runTime = runTime,
+                    playbackSources = playbackSources
+                )
+
+                result[
+                    episodeIdentity(
+                        dataUrl,
+                        season,
+                        episode
+                    )
+                ] = parsed
+            }
+        }
+
+        return result.values.toList()
+    }
+
+    /**
+     * Resolve one exact episode from CTG's authoritative allEpisodes[] payload.
+     *
+     * Unlike a generic whole-page media scan, this first selects the episode
+     * object by its stable CTG episode id and only then reads that object's
+     * links[]. This guarantees Episode N can only emit Episode N sources.
+     */
+    /** Exact fallback for the link object belonging to one episode id. */
+    private fun extractEpisodePlaybackSourcesFast(
+        html: String,
+        baseUrl: String,
+        episodeId: String
+    ): List<CtgPlaybackSource> {
+        if (html.isBlank() || episodeId.isBlank()) return emptyList()
+
+        val marker = "\"episode_id\":\"$episodeId\""
+        val result = mutableListOf<CtgPlaybackSource>()
+        var from = 0
+
+        while (true) {
+            val markerIndex = html.indexOf(marker, from)
+            if (markerIndex < 0) break
+
+            val objectStart = html.lastIndexOf('{', markerIndex)
+            val objectText = if (objectStart >= 0) {
+                extractJsonObjectAt(html, objectStart)
+            } else null
+
+            if (objectText != null &&
+                extractJsonString(objectText, "episode_id") == episodeId
+            ) {
+                val quality = extractJsonString(objectText, "quality")
+                val sourceName = extractJsonString(objectText, "source")
+                val language = extractJsonString(objectText, "language")
+                val subtitles = extractSubtitleTracks(objectText, baseUrl)
+
+                listOfNotNull(
+                    extractJsonString(objectText, "url"),
+                    extractJsonString(objectText, "hls_url")
+                ).forEach { rawUrl ->
+                    val media = absoluteUrl(cleanUrl(rawUrl), baseUrl)
+                    if (isMediaUrl(media)) {
+                        result += CtgPlaybackSource(
+                            url = media,
+                            quality = quality,
+                            sourceName = sourceName,
+                            language = language,
+                            episodeId = episodeId,
+                            movieId = null,
+                            subtitleTracks = subtitles
+                        )
+                    }
+                }
+            }
+
+            from = markerIndex + marker.length
+        }
+
+        return result.distinctBy { mediaDedupKey(it.url) }
+    }
+
+    private fun extractJsonObjectAt(
+        text: String,
+        objectStart: Int
+    ): String? {
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for (index in objectStart until text.length) {
+            val ch = text[index]
+
+            if (inString) {
+                if (escaped) escaped = false
+                else if (ch == '\\') escaped = true
+                else if (ch == '"') inString = false
+                continue
+            }
+
+            when (ch) {
+                '"' -> inString = true
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) {
+                        return text.substring(objectStart, index + 1)
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun extractEpisodeSourcesFromAllEpisodes(
+        html: String,
+        baseUrl: String,
+        episodeId: String
+    ): List<CtgPlaybackSource> {
+        if (html.isBlank() || episodeId.isBlank()) return emptyList()
+
+        val normalized = normalizeCtgPayload(html)
+        val arrays = extractJsonArraysAfterKey(
+            normalized,
+            "\"allEpisodes\""
+        )
+
+        for (arrayText in arrays) {
+            for (objectText in extractTopLevelJsonObjects(arrayText)) {
+                val id = extractJsonString(objectText, "id")
+                    ?: continue
+
+                if (id != episodeId) continue
+
+                val sources = extractEpisodePlaybackSources(
+                    objectText = objectText,
+                    baseUrl = baseUrl,
+                    episodeId = episodeId
+                )
+
+                if (sources.isNotEmpty()) {
+                    return sources
+                }
+            }
+        }
+
+        return emptyList()
+    }
+
+    private fun extractEpisodePlaybackSources(
+        objectText: String,
+        baseUrl: String,
+        episodeId: String
+    ): List<CtgPlaybackSource> {
+        val arrays = extractJsonArraysAfterKey(
+            objectText,
+            "\"links\""
+        )
+
+        if (arrays.isEmpty()) return emptyList()
+
+        val parsed = mutableListOf<CtgPlaybackSource>()
+
+        arrays.forEach { arrayText ->
+            extractTopLevelJsonObjects(arrayText)
+                .forEach { linkObject ->
+                    val linkEpisodeId = extractJsonString(
+                        linkObject,
+                        "episode_id"
+                    )
+
+                    if (
+                        !linkEpisodeId.isNullOrBlank() &&
+                        linkEpisodeId != episodeId
+                    ) {
+                        return@forEach
+                    }
+
+                    val quality = extractJsonString(
+                        linkObject,
+                        "quality"
+                    )
+                    val sourceName = extractJsonString(
+                        linkObject,
+                        "source"
+                    )
+                    val language = extractJsonString(
+                        linkObject,
+                        "language"
+                    )
+                    val subtitleTracks = extractSubtitleTracks(
+                        linkObject,
+                        baseUrl
+                    )
+
+                    listOfNotNull(
+                        extractJsonString(linkObject, "url"),
+                        extractJsonString(linkObject, "hls_url")
+                    ).forEach { rawUrl ->
+                        val media = absoluteUrl(
+                            cleanUrl(rawUrl),
+                            baseUrl
+                        )
+
+                        if (isMediaUrl(media)) {
+                            parsed.add(
+                                CtgPlaybackSource(
+                                    url = media,
+                                    quality = quality,
+                                    sourceName = sourceName,
+                                    language = language,
+                                    episodeId = episodeId,
+                                    movieId = null,
+                                    subtitleTracks = subtitleTracks
+                                )
+                            )
+                        }
+                    }
+                }
+        }
+
+        return parsed.distinctBy { mediaDedupKey(it.url) }
+    }
+
+    private fun mediaDedupKey(
+        url: String
+    ): String {
+        var value = cleanUrl(url)
+
+        repeat(2) {
+            value = runCatching {
+                URLDecoder.decode(
+                    value,
+                    StandardCharsets.UTF_8.toString()
+                )
+            }.getOrElse { value }
+        }
+
+        return runCatching {
+            val uri = URI(value)
+            val scheme = uri.scheme.orEmpty().lowercase(Locale.ROOT)
+            val host = uri.host.orEmpty().lowercase(Locale.ROOT)
+            val path = uri.path.orEmpty()
+            val query = uri.rawQuery.orEmpty()
+            "$scheme://$host$path${if (query.isNotBlank()) "?$query" else ""}"
+        }.getOrElse {
+            value
+        }
+    }
+
+    private fun buildEpisodeWatchUrl(
+        episodeId: String,
+        seriesSlug: String?
+    ): String {
+        val encodedSlug =
+            seriesSlug?.takeIf {
+                it.isNotBlank()
+            }?.let {
+                URLEncoder.encode(
+                    it,
+                    StandardCharsets.UTF_8.toString()
+                )
+            }
+
+        return if (encodedSlug.isNullOrBlank()) {
+            "$mainUrl/watch/$episodeId?type=episode"
+        } else {
+            "$mainUrl/watch/$episodeId?type=episode&series=$encodedSlug"
+        }
+    }
+
+    private fun seriesSlugFromUrl(
+        url: String
+    ): String? {
+        val path = runCatching {
+            URI(url).path.orEmpty()
+        }.getOrNull() ?: return null
+
+        return path
+            .trimEnd('/')
+            .substringAfterLast('/')
+            .takeIf { it.isNotBlank() }
+    }
+
+    private fun watchIdOrEmpty(
+        url: String
+    ): String {
+        return if (isWatchUrl(url)) watchId(url) else ""
+    }
+
+    private fun episodeIdentity(
+        dataUrl: String,
+        season: Int,
+        episode: Int
+    ): String {
+        return "$season:$episode:${cleanUrl(dataUrl)}"
+    }
+
+    private fun parseEpisodeDate(
+        value: String?
+    ): Long? {
+        if (value.isNullOrBlank()) {
+            return null
+        }
+
+        return runCatching {
+            SimpleDateFormat(
+                "yyyy-MM-dd",
+                Locale.ROOT
+            ).apply {
+                timeZone = TimeZone.getTimeZone(
+                    "UTC"
+                )
+            }.parse(value)?.time
+        }.getOrNull()
+    }
+
+    private fun isEpisodeWatchUrl(
+        url: String
+    ): Boolean {
+        if (!isWatchUrl(url)) return false
+
+        return queryParam(
+            url,
+            "type"
+        )?.lowercase(Locale.ROOT) == "episode" ||
+            url.contains(
+                "type=episode",
+                ignoreCase = true
+            )
+    }
+
+    private fun episodeNumber(
+        element: Element,
+        url: String
+    ): Int {
+        val data = sequenceOf(
+            element.attr("data-episode"),
+            element.attr("data-ep")
+        ).firstOrNull { it.isNotBlank() }
+
+        if (data != null) {
+            data.toIntOrNull()?.let { return it }
+        }
+
+        val candidates = listOf(
+            Regex("""(?i)episode[\s._-]*(\d+)""").find(element.text()),
+            Regex("""(?i)\bep[\s._-]*(\d+)""").find(element.text()),
+            Regex("""(?i)episode=(\d+)""").find(url),
+            Regex("""(?i)[?&]ep=(\d+)""").find(url),
+            Regex("""(?i)/episode/(\d+)""").find(url),
+            Regex("""(?i)\bs\d{1,2}\s*e(\d{1,3})""").find(element.text())
+        )
+
+        return candidates.firstNotNullOfOrNull {
+            it?.groupValues?.getOrNull(1)?.toIntOrNull()
+        } ?: 1
+    }
+
+    private fun seasonNumber(
+        element: Element,
+        url: String
+    ): Int {
+        element.attr("data-season")
+            .toIntOrNull()
+            ?.let { return it }
+
+        val candidates = listOf(
+            Regex("""(?i)season[\s._-]*(\d+)""").find(element.text()),
+            Regex("""(?i)\bS(\d{1,2})E\d{1,3}\b""").find(element.text()),
+            Regex("""(?i)season=(\d+)""").find(url)
+        )
+
+        return candidates.firstNotNullOfOrNull {
+            it?.groupValues?.getOrNull(1)?.toIntOrNull()
+        } ?: 1
+    }
+
+    private fun extractMediaUrls(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun add(raw: String?) {
+            if (raw.isNullOrBlank()) return
+
+            val value = cleanUrl(raw)
+            if (
+                value.isBlank() ||
+                value.startsWith("data:", true) ||
+                value.startsWith("javascript:", true)
+            ) {
+                return
+            }
+
+            val absolute = absoluteUrl(                value,
+                baseUrl
+            )
+
+            if (isMediaUrl(absolute)) {
+                found.add(absolute)
+            }
+        }
+
+        document.select(
+            "video[src], " +
+            "video[poster], " +
+            "video source[src], " +
+            "source[src], " +
+            "[data-src], " +
+            "[data-file], " +
+            "[data-video], " +
+            "[data-video-url], " +
+            "[data-file-url], " +
+            "[data-stream], " +
+            "[data-manifest]"
+        ).forEach { element ->
+            add(element.attr("src"))
+            add(element.attr("data-src"))
+            add(element.attr("data-file"))
+            add(element.attr("data-video"))
+            add(element.attr("data-video-url"))
+            add(element.attr("data-file-url"))
+            add(element.attr("data-stream"))
+            add(element.attr("data-manifest"))
+        }
+
+        /*
+         * Small, valid media-only URL regex. It does not contain nested
+         * optional groups like the broken CTG implementation.
+         */
+        val mediaRegex = Regex(
+            """(?i)https?://[^"'<>\s]+\.(?:m3u8|mpd|mp4|mkv|webm|mov|m4v|avi|flv|ts)(?:\?[^"'<>\s]*)?"""
+        )
+
+        mediaRegex.findAll(
+            html
+                .replace("\\/", "/")
+                .replace("&amp;", "&")
+                .replace("\\u0026", "&")
+        ).forEach { match ->
+            add(match.value)
+        }
+
+        /*
+         * Common JavaScript key/value forms.
+         */
+        val keyRegex = Regex(
+            """(?i)(?:file|src|source|video|videoUrl|media|mediaUrl|fileUrl|stream|streamUrl|playlist|manifest)\s*[:=]\s*["']([^"']+)["']"""
+        )
+
+        keyRegex.findAll(
+            html
+                .replace("\\/", "/")
+                .replace("\\u0026", "&")
+        ).forEach { match ->
+            add(match.groupValues[1])
+        }
+
+        return found.toList()
+    }
+
+    private fun recoverDownloadUrls(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        document.select("a[href], button[data-url], [data-file-url]").forEach { element ->
+            val raw = sequenceOf(
+                element.attr("href"),
+                element.attr("data-url"),
+                element.attr("data-file-url")
+            ).firstOrNull { it.isNotBlank() } ?: return@forEach
+
+            recoverQueryMedia(
+                raw,
+                baseUrl
+            )?.let(found::add)
+        }
+
+        /*
+         * Also inspect the HTML without trying to match the whole JavaScript
+         * structure. This keeps the parser safe when the site's markup changes.
+         */
+        html
+            .replace("\\/", "/")
+            .replace("&amp;", "&")
+            .split('"', '\'', ' ', '\n', '\r', '\t', '<', '>', '(', ')')
+            .forEach { token ->
+                if (
+                    token.contains("download", true) ||
+                    token.contains("stream", true) ||
+                    token.contains("file=", true)
+                ) {
+                    recoverQueryMedia(token, baseUrl)?.let(found::add)
+                }
+            }
+
+        return found.toList()
+    }
+
+    private fun recoverQueryMedia(
+        raw: String,
+        baseUrl: String
+    ): String? {
+        val absolute = absoluteUrl(
+            cleanUrl(raw),
+            baseUrl
+        )
+
+        val query = runCatching {
+            URI(absolute).rawQuery.orEmpty()
+        }.getOrDefault("")
+
+        if (query.isBlank()) return null
+
+        query.split('&').forEach { part ->
+            val key = part.substringBefore('=')
+                .trim()
+                .lowercase(Locale.ROOT)
+
+            if (
+                key != "file" &&
+                key != "url" &&
+                key != "src" &&
+                key != "video" &&
+                key != "stream" &&
+                key != "source" &&
+                key != "fileurl" &&
+                key != "videourl"
+            ) {
+                return@forEach
+            }
+
+            val rawValue = part.substringAfter('=', "")
+            val value = runCatching {
+                URLDecoder.decode(
+                    rawValue,
+                    StandardCharsets.UTF_8.toString()
+                )
+            }.getOrNull()?.trim().orEmpty()
+
+            if (value.isBlank()) return@forEach
+
+            val candidate = absoluteUrl(
+                value,
+                baseUrl
+            )
+
+            if (isMediaUrl(candidate)) {
+                return candidate
+            }
+        }
+
+        return null
+    }
+
+    /*
+     * Recover actual media URLs from CTG's server/download controls.
+     *
+     * This handles:
+     * - direct FTP URLs
+     * - percent-encoded FTP URLs
+     * - file/url/src/video/stream query parameters
+     * - href/data-* attributes
+     *
+     * It deliberately does not require a specific server name.
+     */
+    private fun recoverPlayableUrls(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun addCandidate(raw: String?) {
+            if (raw.isNullOrBlank()) return
+
+            var value = cleanUrl(raw)
+
+            repeat(2) {
+                value = runCatching {
+                    URLDecoder.decode(
+                        value,
+                        StandardCharsets.UTF_8.toString()
+                    )
+                }.getOrElse {
+                    value
+                }
+            }
+
+            val absolute = absoluteUrl(
+                value,
+                baseUrl
+            )
+
+            if (isMediaUrl(absolute)) {
+                found.add(absolute)
+            }
+        }
+
+        document.select(
+            "a[href], " +
+            "[data-url], " +
+            "[data-href], " +
+            "[data-file], " +
+            "[data-src], " +
+            "[data-video], " +
+            "[data-video-url], " +
+            "[data-file-url], " +
+            "[data-stream]"
+        ).forEach { element ->
+            addCandidate(element.attr("href"))
+            addCandidate(element.attr("data-url"))
+            addCandidate(element.attr("data-href"))
+            addCandidate(element.attr("data-file"))
+            addCandidate(element.attr("data-src"))
+            addCandidate(element.attr("data-video"))
+            addCandidate(element.attr("data-video-url"))
+            addCandidate(element.attr("data-file-url"))
+            addCandidate(element.attr("data-stream"))
+
+            val rawHref = element.attr("href")
+            if (rawHref.contains("download", true) ||
+                rawHref.contains("stream", true)
+            ) {
+                recoverQueryMedia(
+                    rawHref,
+                    baseUrl
+                )?.let(found::add)
+            }
+        }
+
+        /*
+         * Search the raw HTML for ftp.ctgfun.com first. This is the actual
+         * storage host shown by the supplied working browser URL.
+         */
+        val ftpRegex = Regex(
+            """(?i)https?://ftp\.ctgfun\.com/[^"'<>\s\\]+"""
+        )
+
+        ftpRegex.findAll(
+            html
+                .replace("\\/", "/")
+                .replace("\\u0026", "&")
+                .replace("&amp;", "&")
+        ).forEach { match ->
+            addCandidate(match.value)
+        }
+
+        /*
+         * Decode any percent-encoded FTP URL embedded in the page.
+         */
+        val encodedFtpRegex = Regex(
+            """(?i)(?:https?%3A%2F%2F|https?%253A%252F%252F)ftp%\.ctgfun\.com%2F[^"'<>\s]+"""
+        )
+
+        encodedFtpRegex.findAll(
+            html
+                .replace("\\/", "/")
+                .replace("&amp;", "&")
+        ).forEach { match ->
+            addCandidate(match.value)
+        }
+
+        /*
+         * Finally inspect common query parameters.
+         */
+        html
+            .replace("\\/", "/")
+            .replace("&amp;", "&")
+            .split(
+                '"', '\'', ' ', '\n', '\r', '\t',
+                '<', '>', '(', ')'
+            )
+            .forEach { token ->
+                recoverQueryMedia(
+                    token,
+                    baseUrl
+                )?.let(found::add)
+            }
+
+        return found.toList()
+    }
+
+    private fun extractPoster(
+        document: Document,
+        pageUrl: String
+    ): String? {
+        return extractPosterFromElement(
+            document,
+            pageUrl
+        )
+    }
+
+    private fun extractPosterFromElement(
+        element: Element,
+        pageUrl: String
+    ): String? {
+        val og = element.selectFirst(
+            "meta[property=og:image], meta[name=twitter:image]"
+        )?.attr("content")
+
+        if (!og.isNullOrBlank()) {
+            return absoluteUrl(
+                og,
+                pageUrl
+            )
+        }
+
+        val image = element.select(
+            "img[src], " +
+            "img[data-src], " +
+            "img[data-lazy-src], " +
+            "img[data-original], " +
+            "img[data-poster]"
+        ).firstOrNull()
+
+        if (image != null) {
+            val source = sequenceOf(
+                image.attr("data-poster"),
+                image.attr("data-src"),
+                image.attr("data-lazy-src"),
+                image.attr("data-original"),
+                image.attr("src")
+            ).firstOrNull { it.isNotBlank() }
+
+            if (!source.isNullOrBlank()) {
+                return absoluteUrl(
+                    source,
+                    pageUrl
+                )
+            }
+        }
+
+        return null
+    }
+
+    private fun findCard(
+        element: Element
+    ): Element {
+        var current: Element? = element
+
+        repeat(8) {
+            val node = current ?: return@repeat
+
+            val className = node.className()
+                .lowercase(Locale.ROOT)
+
+            if (
+                node.select("img").isNotEmpty() ||
+                className.contains("card") ||
+                className.contains("movie") ||
+                className.contains("poster") ||
+                className.contains("item")
+            ) {
+                return node
+            }
+
+            current = node.parent()
+        }
+
+        return element
+    }
+
+    private fun extractPageTitle(
+        document: Document
+    ): String {
+        val candidates = listOf(
+            document.selectFirst("h1")?.text(),
+            document.selectFirst("h2")?.text(),
+            document.selectFirst(".title")?.text(),
+            document.selectFirst(".movie-title")?.text(),
+            document.selectFirst(".movie_name")?.text(),
+            document.selectFirst("meta[property=og:title]")?.attr("content"),
+            document.title()
+        )
+
+        return cleanTitle(
+            candidates.firstOrNull {
+                !it.isNullOrBlank()
+            }.orEmpty()
+        )
+    }
+
+    private fun extractPlot(
+        document: Document
+    ): String? {
+        /*
+         * CTG uses a <section><h2>Synopsis</h2><p>...</p></section>
+         * rather than .plot/.description classes.
+         */
+        val synopsis = document
+            .select("section")
+            .firstNotNullOfOrNull { section ->
+                val heading = section
+                    .selectFirst("h2")
+                    ?.text()
+                    ?.trim()
+
+                if (
+                    heading.equals(
+                        "Synopsis",
+                        ignoreCase = true
+                    )
+                ) {
+                    section.selectFirst("p")
+                        ?.text()
+                        ?.trim()
+                        ?.takeIf {
+                            it.isNotBlank()
+                        }
+                } else {
+                    null
+                }
+            }
+
+        val values = listOf(
+            synopsis,
+            document.selectFirst(
+                "meta[property=og:description]"
+            )?.attr("content"),
+            document.selectFirst(
+                "meta[name=description]"
+            )?.attr("content"),
+            document.selectFirst(
+                ".description"
+            )?.text(),
+            document.selectFirst(
+                ".plot"
+            )?.text(),
+            document.selectFirst(
+                ".overview"
+            )?.text(),
+            extractJsonStringFromDocument(
+                document,
+                "overview"
+            )
+        )
+
+        return values.firstOrNull {
+            !it.isNullOrBlank()
+        }?.trim()
+    }
+
+
+    private fun extractJsonStringFromDocument(
+        document: Document,
+        key: String
+    ): String? {
+        val normalized = normalizeCtgPayload(
+            document.html()
+        )
+
+        return extractJsonString(
+            normalized,
+            key
+        )?.takeIf { it.isNotBlank() }
+    }
+
+    private fun extractYear(
+        document: Document
+    ): Int? {
+        val text = document.text()
+
+        return Regex("""(?<!\d)(19\d{2}|20\d{2}|21\d{2})(?!\d)""")
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+    }
+
+    private fun queryParam(
+        url: String,
+        name: String
+    ): String? {
+        val query = runCatching {
+            URI(url).rawQuery.orEmpty()
+        }.getOrDefault("")
+
+        if (query.isBlank()) {
+            return null
+        }
+
+        val target = name.lowercase(Locale.ROOT)
+
+        return query.split('&').firstNotNullOfOrNull { part ->
+            val key = part.substringBefore('=')
+                .lowercase(Locale.ROOT)
+
+            if (key != target) {
+                return@firstNotNullOfOrNull null
+            }
+
+            val rawValue =
+                part.substringAfter('=', "")
+
+            runCatching {
+                URLDecoder.decode(
+                    rawValue,
+                    StandardCharsets.UTF_8.toString()
+                )
+            }.getOrNull()
+        }
+    }
+
+    private fun watchId(
+        url: String
+    ): String {
+        val path = runCatching {
+            URI(url).path.orEmpty()
+        }.getOrDefault(url)
+
+        return path
+            .trimEnd('/')
+            .substringAfterLast('/')
+            .trim()
+    }
+
+    private fun isWatchUrl(
+        url: String
+    ): Boolean {
+        val path = runCatching {
+            URI(url).path.orEmpty()
+                .lowercase(Locale.ROOT)
+        }.getOrDefault("")
+
+        return path.startsWith("/watch/")
+    }
+
+    private fun canonicalContentUrl(
+        url: String
+    ): String {
+        return runCatching {
+            val uri = URI(url)
+
+            URI(
+                uri.scheme ?: "https",
+                uri.host,
+                uri.path.orEmpty()
+                    .trimEnd('/'),
+                null,
+                null
+            ).toString()
+                .trimEnd('/')
+        }.getOrElse {
+            cleanUrl(url)
+                .substringBefore('#')
+                .substringBefore('?')
+                .trimEnd('/')
+        }
+    }
+
+    private fun typeFromUrl(
+        url: String
+    ): TvType {
+        val path = runCatching {
+            URI(url).path.orEmpty().lowercase(Locale.ROOT)
+        }.getOrElse {
+            url.lowercase(Locale.ROOT)
+        }
+
+        return when {
+            path.startsWith("/tv/") -> TvType.TvSeries
+            path.startsWith("/anime/") -> TvType.Anime
+            else -> TvType.Movie
+        }
+    }
+
+    private fun isContentUrl(
+        url: String
+    ): Boolean {
+        val path = runCatching {
+            URI(url).path.orEmpty().lowercase(Locale.ROOT)
+        }.getOrElse {
+            url.lowercase(Locale.ROOT)
+        }
+
+        return path.startsWith("/movies/") ||
+            path.startsWith("/tv/") ||
+            path.startsWith("/anime/")
+    }
+
+    private fun isAudioOnlyMediaUrl(
+        url: String
+    ): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+
+        return lower.contains(".audio.") ||
+            lower.contains("/audio/") ||
+            lower.contains("audio_")
+    }
+
+    private fun isMediaUrl(
+        url: String
+    ): Boolean {
+        val path = runCatching {
+            URI(url).path.orEmpty().lowercase(Locale.ROOT)
+        }.getOrElse {
+            url.lowercase(Locale.ROOT)
+        }
+
+        return mediaExtensions.any {
+            path.endsWith(it)
+        } || path.contains(".mp4") ||
+            path.contains(".mkv") ||
+            path.contains(".m3u8") ||
+            path.contains(".mpd")
+    }
+
+    private fun qualityFromHint(
+        quality: String?
+    ): Int? {
+        val lower = quality
+            ?.lowercase(Locale.ROOT)
+            ?: return null
+
+        return when {
+            lower.contains("4320") || lower.contains("8k") ->
+                4320
+
+            lower.contains("2160") || lower.contains("4k") ->
+                Qualities.P2160.value
+
+            lower.contains("1440") ->
+                Qualities.P1440.value
+
+            lower.contains("1080") ->
+                Qualities.P1080.value
+
+            lower.contains("720") ->
+                Qualities.P720.value
+
+            lower.contains("480") ->
+                Qualities.P480.value
+
+            lower.contains("360") ->
+                Qualities.P360.value
+
+            else ->
+                null
+        }
+    }
+
+    private fun qualityFromUrl(
+        url: String
+    ): Int {
+        val lower = url.lowercase(Locale.ROOT)
+
+        return when {
+            lower.contains("4320") || lower.contains("8k") ->
+                4320
+
+            lower.contains("2160") || lower.contains("4k") ->
+                Qualities.P2160.value
+
+            lower.contains("1440") ->
+                Qualities.P1440.value
+
+            lower.contains("1080") ->
+                Qualities.P1080.value
+
+            lower.contains("720") ->
+                Qualities.P720.value
+
+            lower.contains("480") ->
+                Qualities.P480.value
+
+            lower.contains("360") ->
+                Qualities.P360.value
+
+            else ->
+                Qualities.Unknown.value
+        }
+    }
+
+    private fun hasNextPage(
+        document: Document,
+        currentPage: Int
+    ): Boolean {
+        val next = document.select("a[href]").firstOrNull { anchor ->
+            val text = anchor.text()
+                .trim()
+                .lowercase(Locale.ROOT)
+
+            val rel = anchor.attr("rel")
+                .lowercase(Locale.ROOT)
+
+            val href = anchor.attr("href")
+                .lowercase(Locale.ROOT)
+
+            text.contains("next") ||
+                rel.contains("next") ||
+                href.contains("page=${currentPage + 1}")
+        }
+
+        return next != null
+    }
+
+    private fun pageUrl(
+        base: String,
+        page: Int
+    ): String {
+        if (page <= 1) return base
+
+        return if (base.contains("?")) {
+            "$base&page=$page"
+        } else {
+            "$base?page=$page"
+        }
+    }
+
+    private fun pageSuffix(
+        page: Int
+    ): String {
+        return if (page > 1) {
+            "&page=$page"
+        } else {
+            ""
+        }
+    }
+
+    private fun absoluteUrl(
+        raw: String,
+        base: String
+    ): String {
+        val value = cleanUrl(raw)
+
+        if (value.startsWith("//")) {
+            val scheme = runCatching {
+                URI(base).scheme
+            }.getOrNull() ?: "https"
+
+            return "$scheme:$value"
+        }
+
+        if (
+            value.startsWith("http://", true) ||
+            value.startsWith("https://", true)
+        ) {
+            return value
+        }
+
+        return runCatching {
+            URI(base).resolve(value).toString()
+        }.getOrElse {
+            value
+        }
+    }
+
+    private fun titleFromUrl(
+        url: String
+    ): String {
+        val path = runCatching {
+            URI(url).path.orEmpty()
+        }.getOrElse {
+            url
+        }
+
+        val slug = path
+            .trimEnd('/')
+            .substringAfterLast('/')
+
+        return slug
+            .replace('-', ' ')
+            .replace('_', ' ')
+            .replaceFirstChar {
+                if (it.isLowerCase()) {
+                    it.titlecase(Locale.ROOT)
+                } else {
+                    it.toString()
+                }
+            }
+            .ifBlank {
+                "CTG FTP"
+            }
+    }
+
+    private fun cleanTitle(
+        value: String
+    ): String {
+        return value
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    private fun cleanUrl(
+        raw: String
+    ): String {
+        return raw
+            .trim()
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+            .trim('"', '\'', '`')
+            .trimEnd(',', ';', ')', ']', '}')
+    }
+
+    private fun firstNonBlank(
+        vararg values: String?
+    ): String {
+        return values.firstOrNull {
+            !it.isNullOrBlank()
+        }?.trim().orEmpty()
+    }
+
+    private fun isNavigationTitle(
+        value: String
+    ): Boolean {
+        return value.lowercase(Locale.ROOT) in setOf(
+            "home",
+            "movies",
+            "tv",
+            "tv shows",
+            "anime",
+            "games",
+            "search",
+            "all",
+            "newest",
+            "popular",
+            "top rated",
+            "next",
+            "previous",
+            "details",
+            "play"
+        )
+    }
+}
