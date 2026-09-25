@@ -1996,3 +1996,1082 @@ class CinePlexFTP : MainAPI() {
 
         fun addDownload(raw: String?) {
             if (raw.isNullOrBlank()) return
+            val cleaned = cleanUrl(raw)
+
+            if (!cleaned.contains("download.php", true)) return
+
+            val query = runCatching {
+                URI(absoluteUrl(cleaned, baseUrl)).rawQuery.orEmpty()
+            }.getOrDefault("")
+
+            val fileValue = query
+                .split('&')
+                .firstOrNull {
+                    it.substringBefore('=')
+                        .equals("file", ignoreCase = true)
+                }
+                ?.substringAfter('=', "")
+
+            if (fileValue.isNullOrBlank()) return
+
+            val decoded = runCatching {
+                URLDecoder.decode(
+                    fileValue,
+                    StandardCharsets.UTF_8.toString()
+                )
+            }.getOrNull()?.trim().orEmpty()
+
+            if (decoded.isBlank()) return
+
+            /*
+             * Only recover a real media file path.
+             * Example:
+             * uploads/videos/1788517057_Neru_2023.mp4
+             */
+            if (!isMediaUrl("http://example.com/$decoded")) return
+
+            val direct = if (
+                decoded.startsWith("http://", true) ||
+                decoded.startsWith("https://", true)
+            ) {
+                decoded
+            } else {
+                absoluteUrl(
+                    if (decoded.startsWith("/")) decoded else "/$decoded",
+                    baseUrl
+                )
+            }
+
+            if (isMediaUrl(direct)) {
+                found.add(direct)
+            }
+        }
+
+        document.select(
+            "a[href*='download.php'], " +
+                "a.download-btn"
+        ).forEach { anchor ->
+            addDownload(anchor.attr("href"))
+        }
+
+        val cleanedHtml = html
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+
+        val regex = Regex(
+            """(?i)(?:https?://[^"'<>\s]+|(?:/|\.\.?/)?download\.php\?[^"'<>\s)]+)"""
+        )
+
+        regex.findAll(cleanedHtml).forEach { match ->
+            addDownload(match.value)
+        }
+
+        return found.toList()
+    }
+
+    /*
+     * Extract every real media URL exposed by the watch page.
+     *
+     * Supports:
+     * - <video src>
+     * - <source src>
+     * - data-video / data-src / data-file / ...
+     * - URLs embedded in JavaScript player objects
+     * - direct media files such as .mp4, .mkv, .webm, .m3u8, and .mpd
+     */
+    private fun extractMediaUrls(
+        document: Document,
+        html: String,
+        baseUrl: String
+    ): List<String> {
+        val found = linkedSetOf<String>()
+
+        fun add(raw: String?) {
+            if (raw.isNullOrBlank()) return
+
+            val value = cleanUrl(raw)
+                .replace("\\x2F", "/")
+                .trim()
+
+            if (value.isBlank() || value.startsWith("data:", true) || value.startsWith("javascript:", true)) {
+                return
+            }
+
+            /*
+             * IMPORTANT: Cine Plex uses plain relative paths such as
+             * `uploads/videos/1788517057_Neru_2023.mp4` without a leading `/`.
+             * Always resolve relative URLs against the watch-page URL instead
+             * of requiring the path to begin with '/', './' or '../'.
+             */
+            val fixed = absoluteUrl(value, baseUrl)
+
+            if (isCinePlexFullMediaUrl(fixed)) {
+                found.add(fixed)
+            }
+        }
+
+        /*
+         * DOM first: this is the most trustworthy source because it matches
+         * the website's actual <video>/<source> element.
+         */
+        document.select(
+            "video[src], " +
+                "video source[src], " +
+                "source[src], " +
+                "[src], " +
+                "[data-src], " +
+                "[data-video], " +
+                "[data-file], " +
+                "[data-url], " +
+                "[data-source], " +
+                "[data-stream], " +
+                "[data-file-url], " +
+                "[data-video-url], " +
+                "[data-playlist], " +
+                "[data-manifest]"
+        ).forEach { element ->
+            add(element.attr("src"))
+            add(element.attr("data-src"))
+            add(element.attr("data-video"))
+            add(element.attr("data-file"))
+            add(element.attr("data-url"))
+            add(element.attr("data-source"))
+            add(element.attr("data-stream"))
+            add(element.attr("data-file-url"))
+            add(element.attr("data-video-url"))
+            add(element.attr("data-playlist"))
+            add(element.attr("data-manifest"))
+            add(element.attr("href"))
+        }
+
+        val cleanedHtml = html
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("\\u003A", ":")
+            .replace("&amp;", "&")
+
+        /*
+         * Direct media URL regex.
+         */
+        val directRegex = Regex(
+            """(?i)(?:https?://[^"'<>\s\\]+|(?<![A-Za-z0-9_./-])(?:uploads/|videos/|media/|files/)[^"'<>\s\\]+)\.(?:m3u8|mpd|mp4|mkv|webm|mov|m4v|avi|flv|ts)(?:\?[^"'<>\s\\]*)?"""
+        )
+
+        directRegex.findAll(cleanedHtml).forEach {
+            add(it.value)
+        }
+
+        /*
+         * Player object / JavaScript variable fallback.
+         */
+        val keyRegex = Regex(
+            """(?i)(?:file|src|source|url|video|videoUrl|media|mediaUrl|fileUrl|video_url|stream|streamUrl)\s*[:=]\s*["']([^"']+)["']"""
+        )
+
+        keyRegex.findAll(cleanedHtml).forEach {
+            add(it.groupValues[1])
+        }
+
+        return found.toList()
+    }
+
+    /*
+     * Parse Cine Plex cards.
+     *
+     * The site uses:
+     *   <div class="movie-card" onclick="openMovie(994)">
+     *   <div class="movie-card" onclick="openSeries(99)">
+     *
+     * Titles come from the card's visible title / heading / image alt,
+     * and the poster comes from the card's image.
+     */
+    private fun parseItems(
+        document: Document,
+        sourceUrl: String,
+        sectionName: String,
+        page: Int
+    ): List<SiteItem> {
+        val result = linkedMapOf<String, SiteItem>()
+
+        var order = page.toLong() * 1_000_000L
+
+        val elements = document.select(
+            ".movie-card, " +
+                ".movie-grid .movie-card, " +
+                "a[href], " +
+                "[data-href], " +
+                "[data-url], " +
+                "[data-link], " +
+                "[onclick]"
+        )
+
+        elements.forEach { element ->
+            val rawCandidates = listOf(
+                element.attr("href"),
+                element.attr("data-href"),
+                element.attr("data-url"),
+                element.attr("data-link"),
+                element.attr("onclick")
+            ).filter { it.isNotBlank() }
+
+            val href = rawCandidates.asSequence()
+                .mapNotNull { extractContentUrl(it) }
+                .firstOrNull()
+                ?: return@forEach
+
+            val absolute = absoluteUrl(href, sourceUrl)
+
+            if (!looksLikeContentLink(absolute)) {
+                return@forEach
+            }
+
+            val card = findCard(element)
+
+            val title = cleanTitle(
+                extractCardTitle(element, card)
+                    .ifBlank { titleFromUrl(absolute) }
+            )
+
+            if (title.isBlank() || isNavigationTitle(title)) {
+                return@forEach
+            }
+
+            val series =
+                isSeriesUrl(absolute) ||
+                    sectionName.contains("TV", true) ||
+                    absolute.contains("type=series", true) ||
+                    absolute.contains("type=tv", true)
+
+            if (!result.containsKey(absolute)) {
+                result[absolute] = SiteItem(
+                    title = title,
+                    url = absolute,
+                    poster = extractPosterFromElement(
+                        card,
+                        sourceUrl
+                    ),
+                    isSeries = series,
+                    sortTime = extractSortTime(
+                        card,
+                        element
+                    ),
+                    discoveryOrder = order++
+                )
+            }
+        }
+
+        val values = result.values.toList()
+
+        /*
+         * Preserve Cine Plex's own listing order.
+         *
+         * If the site exposes a real upload/created timestamp, use it.
+         * Never treat a plain "2026" release year as upload time.
+         */
+        val hasRealTimestamp = values.any {
+            it.sortTime > 0L
+        }
+
+        return if (hasRealTimestamp) {
+            values.sortedWith(
+                compareByDescending<SiteItem> { it.sortTime }
+                    .thenBy { it.discoveryOrder }
+            )
+        } else {
+            values.sortedBy {
+                it.discoveryOrder
+            }
+        }
+    }
+
+    private fun extractSortTime(
+        card: Element,
+        anchor: Element
+    ): Long {
+        val values = listOf(
+            card.attr("data-created"),
+            card.attr("data-uploaded"),
+            card.attr("data-upload-date"),
+            card.attr("data-created-at"),
+            card.attr("data-uploaded-at"),
+            card.attr("data-published"),
+            card.attr("data-published-at"),
+            card.attr("datetime"),
+
+            anchor.attr("data-created"),
+            anchor.attr("data-uploaded"),
+            anchor.attr("data-upload-date"),
+            anchor.attr("data-created-at"),
+            anchor.attr("data-uploaded-at"),
+            anchor.attr("data-published"),
+            anchor.attr("data-published-at"),
+            anchor.attr("datetime"),
+
+            card.selectFirst("time[datetime]")
+                ?.attr("datetime")
+        )
+            .filterNotNull()
+            .filter { it.isNotBlank() }
+
+        for (value in values) {
+            val clean = value.trim()
+
+            if (Regex("""^\d{4}$""").matches(clean)) {
+                continue
+            }
+
+            clean.toLongOrNull()?.let { number ->
+                return if (number < 10_000_000_000L) {
+                    number * 1000L
+                } else {
+                    number
+                }
+            }
+
+            parseDate(clean)?.let {
+                return it
+            }
+        }
+
+        return 0L
+    }
+
+    private fun parseDate(
+        value: String
+    ): Long? {
+        val patterns = listOf(
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd",
+
+            "dd-MM-yyyy HH:mm:ss",
+            "dd-MM-yyyy HH:mm",
+            "dd-MM-yyyy",
+
+            "dd/MM/yyyy HH:mm:ss",
+            "dd/MM/yyyy HH:mm",
+            "dd/MM/yyyy",
+
+            "MMM dd, yyyy HH:mm:ss",
+            "MMM dd, yyyy HH:mm",
+            "MMM dd, yyyy"
+        )
+
+        for (pattern in patterns) {
+            val parsed = runCatching {
+                SimpleDateFormat(
+                    pattern,
+                    Locale.ENGLISH
+                ).parse(value)?.time
+            }.getOrNull()
+
+            if (parsed != null) {
+                return parsed
+            }
+        }
+
+        return null
+    }
+
+    private fun parseEpisodes(
+        document: Document,
+        baseUrl: String
+    ): List<Episode> {
+        val result = linkedMapOf<String, Episode>()
+
+        document.select(
+            "a[href], [data-href], [data-url], [data-link]"
+        ).forEach { element ->
+            val raw = sequenceOf(
+                element.attr("href"),
+                element.attr("data-href"),
+                element.attr("data-url"),
+                element.attr("data-link")
+            ).firstOrNull { it.isNotBlank() } ?: return@forEach
+
+            val absolute = absoluteUrl(
+                cleanUrl(raw),
+                baseUrl
+            )
+
+            if (absolute == baseUrl || !looksLikeContentLink(absolute)) {
+                return@forEach
+            }
+
+            val label = cleanTitle(
+                sequenceOf(
+                    element.text(),
+                    element.attr("aria-label"),
+                    element.attr("title")
+                ).firstOrNull { it.isNotBlank() } ?: "Episode"
+            )
+
+            val lower = absolute.lowercase(Locale.ROOT)
+            val explicitEpisode =
+                lower.contains("episode") ||
+                    lower.contains("ep=") ||
+                    lower.contains("episode=") ||
+                    lower.contains("season=") ||
+                    lower.contains("type=episode")
+
+            val labelLooksEpisode = Regex(
+                "(?i)\\b(?:episode|ep|e)\\s*[-._ ]?\\d+"
+            ).containsMatchIn(label)
+
+            val hasEpisodeData =
+                element.attr("data-episode").isNotBlank() ||
+                    element.attr("data-ep").isNotBlank()
+
+            if (explicitEpisode || labelLooksEpisode || hasEpisodeData) {
+                val season = seasonNumberFrom(element, label, absolute)
+                val episode = episodeNumberFrom(element, label, absolute)
+
+                result[absolute] = newEpisode(absolute) {
+                    name = label.ifBlank { "Episode $episode" }
+                    this.season = season
+                    this.episode = episode
+                }
+            }
+        }
+
+        /*
+         * Cine Plex TV pages can also expose plain watch.php episode cards
+         * without textual "Episode" labels. When no explicit episode was
+         * detected, use those watch.php cards in page order and number them.
+         */
+        if (result.isEmpty()) {
+            val watchLinks = document.select("a[href*='watch.php?id=']")
+            var sequential = 1
+
+            for (anchor in watchLinks) {
+                val absolute = absoluteUrl(
+                    cleanUrl(anchor.attr("href")),
+                    baseUrl
+                )
+
+                if (absolute == baseUrl || !isCinePlexPageUrl(absolute)) continue
+
+                val label = cleanTitle(
+                    sequenceOf(
+                        anchor.text(),
+                        anchor.attr("aria-label"),
+                        anchor.attr("title")
+                    ).firstOrNull { it.isNotBlank() } ?: "Episode $sequential"
+                )
+
+                result.putIfAbsent(absolute, newEpisode(absolute) {
+                    name = label
+                    season = 1
+                    episode = sequential
+                })
+
+                sequential++
+            }
+        }
+
+        /* Single-file TV page fallback. */
+        if (result.isEmpty()) {
+            val direct = extractMediaUrls(
+                document,
+                document.html(),
+                baseUrl
+            ).firstOrNull()
+
+            if (direct != null) {
+                result[direct] = newEpisode(direct) {
+                    name = "Episode 1"
+                    season = 1
+                    episode = 1
+                }
+            }
+        }
+
+        return result.values.sortedWith(
+            compareBy<Episode> { it.season ?: 1 }
+                .thenBy { it.episode ?: Int.MAX_VALUE }
+        )
+    }
+
+    private fun seasonNumberFrom(
+        element: Element,
+        title: String,
+        url: String
+    ): Int {
+        val candidates = listOf(
+            element.attr("data-season"),
+            Regex("(?i)\\bseason\\s*([0-9]+)").find(title)?.groupValues?.getOrNull(1),
+            Regex("(?i)\\bs\\s*([0-9]+)").find(title)?.groupValues?.getOrNull(1),
+            Regex("(?i)(?:season|s)=([0-9]+)").find(url)?.groupValues?.getOrNull(1)
+        )
+
+        return candidates
+            .firstNotNullOfOrNull { it?.toIntOrNull() }
+            ?: 1
+    }
+
+    private fun episodeNumberFrom(
+        element: Element,
+        title: String,
+        url: String
+    ): Int {
+        val candidates = listOf(
+            element.attr("data-episode"),
+            element.attr("data-ep"),
+            Regex("(?i)\\bepisode\\s*[-._ ]?([0-9]+)").find(title)?.groupValues?.getOrNull(1),
+            Regex("(?i)\\bep\\s*[-._ ]?([0-9]+)").find(title)?.groupValues?.getOrNull(1),
+            Regex("(?i)\\be\\s*[-._ ]?([0-9]+)").find(title)?.groupValues?.getOrNull(1),
+            Regex("(?i)(?:episode|ep|e)=([0-9]+)").find(url)?.groupValues?.getOrNull(1)
+        )
+
+        return candidates
+            .firstNotNullOfOrNull { it?.toIntOrNull() }
+            ?: 1
+    }
+
+    private fun isCinePlexPageUrl(url: String): Boolean {
+        val host = runCatching {
+            URI(url).host?.lowercase(Locale.ROOT).orEmpty()
+        }.getOrDefault("")
+
+        return host == "cineplexbd.net" || host.endsWith(".cineplexbd.net")
+    }
+
+    private fun findCard(
+        anchor: Element
+    ): Element {
+        var current: Element? = anchor
+
+        repeat(8) {
+            val element = current ?: return@repeat
+
+            val cls = element
+                .className()
+                .lowercase(Locale.ROOT)
+
+            if (
+                element.select("img").isNotEmpty() ||
+                cls.contains("card") ||
+                cls.contains("movie") ||
+                cls.contains("item") ||
+                cls.contains("poster")
+            ) {
+                return element
+            }
+
+            current = element.parent()
+        }
+
+        return anchor
+    }
+
+    private fun extractCardTitle(
+        anchor: Element,
+        card: Element
+    ): String {
+        val selectors = listOf(
+            ".title",
+            ".movie-title",
+            ".movie_name",
+            ".name",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "strong"
+        )
+
+        for (selector in selectors) {
+            val text = card
+                .selectFirst(selector)
+                ?.text()
+                ?.trim()
+                .orEmpty()
+
+            if (text.isNotBlank()) {
+                return text
+            }
+        }
+
+        val aria = anchor
+            .attr("aria-label")
+            .trim()
+
+        if (aria.isNotBlank()) {
+            return aria
+        }
+
+        val alt = card
+            .selectFirst("img")
+            ?.attr("alt")
+            ?.trim()
+
+        if (!alt.isNullOrBlank()) {
+            return alt
+        }
+
+        return anchor.text().trim()
+    }
+
+    private fun extractPoster(
+        document: Document,
+        pageUrl: String
+    ): String? {
+        return extractPosterFromElement(
+            document,
+            pageUrl
+        )
+    }
+
+    private fun extractPosterFromElement(
+        element: Element,
+        pageUrl: String
+    ): String? {
+        val videoPoster = element
+            .select("video[poster], video[data-poster]")
+            .asSequence()
+            .mapNotNull {
+                it.attr("poster")
+                    .ifBlank {
+                        it.attr("data-poster")
+                    }
+                    .takeIf(String::isNotBlank)
+            }
+            .map {
+                absoluteUrl(
+                    it,
+                    pageUrl
+                )
+            }
+            .firstOrNull()
+
+        if (!videoPoster.isNullOrBlank()) {
+            return videoPoster
+        }
+
+        val meta = element
+            .selectFirst(
+                "meta[property=og:image], " +
+                    "meta[name=twitter:image]"
+            )
+            ?.attr("content")
+            ?.trim()
+
+        if (!meta.isNullOrBlank()) {
+            return absoluteUrl(
+                meta,
+                pageUrl
+            )
+        }
+
+        val images = element.select(
+            "img[src], " +
+                "img[data-src], " +
+                "img[data-lazy-src], " +
+                "img[data-original], " +
+                "img[data-poster]"
+        )
+
+        val preferred = images.firstOrNull { image ->
+            val all =
+                "${imageSource(image)} " +
+                    "${image.attr("alt")} " +
+                    "${image.className()}"
+                    .lowercase(Locale.ROOT)
+
+            all.contains("poster") ||
+                all.contains("cover") ||
+                all.contains("thumb") ||
+                all.contains("movie")
+        } ?: images.firstOrNull()
+
+        if (preferred != null) {
+            imageSource(preferred)?.let {
+                return absoluteUrl(
+                    it,
+                    pageUrl
+                )
+            }
+        }
+
+        val style = element
+            .select("[style*=background]")
+            .map { it.attr("style") }
+            .firstOrNull {
+                it.contains("url(", true)
+            }
+
+        if (!style.isNullOrBlank()) {
+            Regex(
+                """(?i)url\(\s*['"]?([^'")]+)['"]?\s*\)"""
+            ).find(style)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.let {
+                    return absoluteUrl(
+                        it,
+                        pageUrl
+                    )
+                }
+        }
+
+        return null
+    }
+
+    private fun imageSource(
+        image: Element
+    ): String? {
+        return sequenceOf(
+            image.attr("data-poster"),
+            image.attr("data-src"),
+            image.attr("data-lazy-src"),
+            image.attr("data-original"),
+            image.attr("src")
+        ).firstOrNull {
+            it.isNotBlank()
+        }
+    }
+
+    private fun looksLikeContentLink(
+        href: String
+    ): Boolean {
+        val lower = href.lowercase(Locale.ROOT)
+
+        if (
+            lower.isBlank() ||
+            lower.startsWith("#") ||
+            lower.startsWith("javascript:")
+        ) {
+            return false
+        }
+
+        return lower.contains("view.php?id=") ||
+            lower.contains("watch.php?id=") ||
+            lower.contains("watch.php?series_id=") ||
+            lower.contains("watch.php?series-id=") ||
+            lower.contains("player.php?id=") ||
+            lower.contains("movie.php") ||
+            lower.contains("series.php") ||
+            lower.contains("show.php") ||
+            lower.contains("details.php") ||
+            lower.contains("movie?id=") ||
+            lower.contains("type=movie") ||
+            lower.contains("type=series") ||
+            lower.contains("type=tv")
+    }
+
+    private fun looksLikeEpisodeLink(
+        href: String
+    ): Boolean {
+        val lower = href.lowercase(Locale.ROOT)
+
+        return looksLikeContentLink(href) && (
+            lower.contains("episode") ||
+                lower.contains("ep=") ||
+                lower.contains("episode=") ||
+                lower.contains("season=") ||
+                lower.contains("type=episode")
+            )
+    }
+
+    private fun hasNextPage(
+        document: Document,
+        currentPage: Int
+    ): Boolean {
+        return document
+            .select("a[href]")
+            .any { anchor ->
+                val text = anchor
+                    .text()
+                    .trim()
+                    .lowercase(Locale.ROOT)
+
+                val rel = anchor
+                    .attr("rel")
+                    .lowercase(Locale.ROOT)
+
+                text == "next" ||
+                    text.contains("next") ||
+                    rel == "next" ||
+                    anchor
+                        .attr("aria-label")
+                        .contains("next", true) ||
+                    anchor
+                        .attr("href")
+                        .contains(
+                            "page=${currentPage + 1}"
+                        )
+            }
+    }
+
+    private fun pageUrl(
+        base: String,
+        page: Int
+    ): String {
+        if (page <= 1) {
+            return base
+        }
+
+        return if (base.contains("?")) {
+            "$base&page=$page"
+        } else {
+            "$base?page=$page"
+        }
+    }
+
+    private fun isSeriesUrl(
+        url: String
+    ): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+
+        return lower.contains("tvs.php") ||
+            lower.contains("watch.php") ||
+            lower.contains("series.php") ||
+            lower.contains("show.php") ||
+            lower.contains("type=series") ||
+            lower.contains("type=tv")
+    }
+
+    private fun isAnimeUrl(
+        url: String
+    ): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        return lower.contains("category=anime") ||
+            lower.contains("category=animation") ||
+            lower.contains("/anime")
+    }
+
+    private fun looksLikeSeriesPage(
+        document: Document
+    ): Boolean {
+        val text = document
+            .text()
+            .lowercase(Locale.ROOT)
+
+        return text.contains("season") &&
+            text.contains("episode")
+    }
+
+    private fun isMediaUrl(
+        url: String
+    ): Boolean {
+        val path = runCatching {
+            URI(url)
+                .path
+                .lowercase(Locale.ROOT)
+        }.getOrElse {
+            url.lowercase(Locale.ROOT)
+        }
+
+        return mediaExtensions.any {
+            path.endsWith(it)
+        }
+    }
+
+    private fun titleFromUrl(
+        url: String
+    ): String {
+        return runCatching {
+            URI(url)
+                .query
+                ?.split('&')
+                ?.firstOrNull {
+                    it.startsWith("id=")
+                }
+                ?.substringAfter('=')
+        }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Cine Plex"
+    }
+
+    private fun cleanUrl(
+        raw: String
+    ): String {
+        return raw
+            .trim()
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+            .trim('"', '\'', '`')
+            .trimEnd(',', ';', ')', ']', '}')
+    }
+
+    private fun cleanTitle(
+        value: String
+    ): String {
+        return value
+            .replace(
+                Regex("\\s+"),
+                " "
+            )
+            .replace(
+                Regex(
+                    "(?i)\\s*[-|•]+\\s*" +
+                        "(watch|download|play)\\s*$"
+                ),
+                ""
+            )
+            .trim()
+    }
+
+    private fun isNavigationTitle(
+        value: String
+    ): Boolean {
+        return value
+            .lowercase(Locale.ROOT) in
+            setOf(
+                "home",
+                "movies",
+                "tv shows",
+                "tv series",
+                "live tv",
+                "search",
+                "genres",
+                "software",
+                "request",
+                "next",
+                "previous"
+            )
+    }
+
+    private fun extractContentUrl(
+        raw: String
+    ): String? {
+        if (raw.isBlank()) {
+            return null
+        }
+
+        val cleaned = raw
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+            .trim()
+
+        val patterns = listOf(
+            Regex("""(?i)https?://[^"'<>\s)]+"""),
+            Regex("""(?i)(?:/|\.\.?/)?(?:view|player)\.php\?[^"'<>\s)]+"""),
+            Regex("""(?i)(?:/|\.\.?/)?watch\.php\?[^"'<>\s)]+"""),
+            Regex("""(?i)(?:/|\.\.?/)?(?:movie|series|show|details)\.php\?[^"'<>\s)]+""")
+        )
+
+        for (pattern in patterns) {
+            val match = pattern
+                .find(cleaned)
+                ?.value
+                ?: continue
+
+            return match
+                .trim(
+                    ',',
+                    ';',
+                    ')',
+                    ']',
+                    '}',
+                    '"',
+                    '\''
+                )
+                .replace("&amp;", "&")
+        }
+
+        return null
+    }
+
+    private fun absoluteUrl(
+        raw: String,
+        base: String
+    ): String {
+        val value = raw.trim()
+
+        if (value.startsWith("//")) {
+            val scheme = runCatching {
+                URI(base).scheme
+            }.getOrNull() ?: "http"
+
+            return "$scheme:$value"
+        }
+
+        if (
+            value.startsWith("http://") ||
+            value.startsWith("https://")
+        ) {
+            return value
+        }
+        return runCatching {
+            URI(base).resolve(value).toString()
+        }.getOrElse {
+            value
+        }
+    }
+
+    private fun extractPageTitle(
+        document: Document
+    ): String {
+        val selectors = listOf(
+            "h1",
+            "h2",
+            ".movie-title",
+            ".movie_name",
+            ".title",
+            "meta[property=og:title]"
+        )
+
+        for (selector in selectors) {
+            val element = document
+                .selectFirst(selector)
+                ?: continue
+
+            val text =
+                if (element.tagName() == "meta") {
+                    element.attr("content")
+                } else {
+                    element.text()
+                }
+
+            if (text.isNotBlank()) {
+                return cleanTitle(text)
+            }
+        }
+
+        return cleanTitle(
+            document.title()
+        )
+    }
+
+    private fun episodeNumber(
+        anchor: Element,
+        title: String,
+        url: String
+    ): Int {
+        val candidates = listOf(
+            Regex(
+                "(?i)episode\\s*([0-9]+)"
+            ).find(title)
+                ?.groupValues
+                ?.getOrNull(1),
+
+            Regex(
+                "(?i)\\bep\\s*([0-9]+)"
+            ).find(title)
+                ?.groupValues
+                ?.getOrNull(1),
+
+            Regex(
+                "(?i)(?:episode|ep)=([0-9]+)"
+            ).find(url)
+                ?.groupValues
+                ?.getOrNull(1),
+
+            anchor
+                .attr("data-episode")
+                .takeIf {
+                    it.isNotBlank()
+                }
+        )
+
+        return candidates
+            .firstNotNullOfOrNull {
+                it?.toIntOrNull()
+            }
+            ?: 1
+    }
+}
