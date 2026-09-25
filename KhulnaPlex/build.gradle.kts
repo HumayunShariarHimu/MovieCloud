@@ -10,5 +10,6 @@ cloudstream {
         "Anime"
     )
     language = "bn"
+    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/KhulnaPlex/icon.svg"
     isCrossPlatform = true
 }
