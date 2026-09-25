@@ -1,0 +1,357 @@
+[
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/BasPlayFTP/icon.svg",
+    "jarFileSize": 251610,
+    "fileHash": "sha256-bb58822a3c1b13bb0f71651182eb5afcf63d383668958587f9db7b13e1f4c40d",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 55769,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 13,
+    "internalName": "BasPlayFTP",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/BasPlayFTP.jar",
+    "description": "Bas Play FTP provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/BasPlayFTP.cs3",
+    "name": "BasPlayFTP",
+    "jarHash": "sha256-527e81a48cd53bf13e25743ee850b44ece2ba150ed7e810d6b5e07f032945231"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/CinePlexFTP/icon.svg",
+    "jarFileSize": 234660,
+    "fileHash": "sha256-d08e5b4a689ba71d3b7761f0ec3b87315746303c56b5969cddb25f7e03aa8202",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 66406,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "CinePlexFTP",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/CinePlexFTP.jar",
+    "description": "Cine Plex FTP provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/CinePlexFTP.cs3",
+    "name": "CinePlexFTP",
+    "jarHash": "sha256-391cb97b074a807e0ec91c3bf71b3a1b0830d5b99519f02ca082eb5a45c2cb42"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/CTGFTP/icon.svg",
+    "jarFileSize": 257595,
+    "fileHash": "sha256-4091d54cc90e2efe5dab632477408359d19995d5b3616af359f25fac44760d79",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 77952,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 12,
+    "internalName": "CTGFTP",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/CTGFTP.jar",
+    "description": "CTG FTP provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/CTGFTP.cs3",
+    "name": "CTGFTP",
+    "jarHash": "sha256-1cd0bfe6d0c9169d74076dd292755296a56f9edeec268e69098c3fa406fa5736"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/DhakaFTP/icon.svg",
+    "fileHash": "sha256-36df4f3903985d983770eed8ceaf013d99677ba5ab9608e32faa3c3b3b286bc9",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 170483,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 2,
+    "internalName": "DhakaFTP",
+    "description": "Dhaka FTP",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/DhakaFTP.cs3",
+    "name": "DhakaFTP"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/DiscoveryFTP/icon.svg",
+    "jarFileSize": 327444,
+    "fileHash": "sha256-6a72e69574514af849640f326ae81665147f9e9b1f18aaf0b09e80f1ecfd4898",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 73602,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "DiscoveryFTP",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/DiscoveryFTP.jar",
+    "description": "Discovery FTP provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/DiscoveryFTP.cs3",
+    "name": "DiscoveryFTP",
+    "jarHash": "sha256-bb2e6c87f0a52182d9080e2dd3ee3a7219d14b2f06f7ecc1f34408ea3887ad99"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/HiAnime/icon.svg",
+    "jarFileSize": 194866,
+    "fileHash": "sha256-500cf915559d6555f38592b8785cbaa10fa92628c1a124f24293f59822ee572a",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 56999,
+    "status": 1,
+    "language": "en",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "HiAnime",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/HiAnime.jar",
+    "description": "Hi Anime provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/HiAnime.cs3",
+    "name": "HiAnime",
+    "jarHash": "sha256-2ea6726745ea8a81040db2592926c815c63df324c26d0601880ec603681b036c"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/KhulnaPlex/icon.svg",
+    "jarFileSize": 110432,
+    "fileHash": "sha256-7848e027dd93224e7d83b4cfdd0853620fc60bb43458389382cd3db9610143a7",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 32631,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 16,
+    "internalName": "KhulnaPlex",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/KhulnaPlex.jar",
+    "description": "Khulna Plex provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/KhulnaPlex.cs3",
+    "name": "KhulnaPlex",
+    "jarHash": "sha256-de247cac85402fb0e47c23f009f988439916dd8f7a224d384c2b5480e4eea333"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MojaLoss/icon.svg",
+    "jarFileSize": 211463,
+    "fileHash": "sha256-c06c3f35ac9fe7af55044d9a1f9d523d88e380d03344ba6f3a4268bbc8715ba9",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 52971,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "MojaLoss",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MojaLoss.jar",
+    "description": "Moja Loss provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MojaLoss.cs3",
+    "name": "MojaLoss",
+    "jarHash": "sha256-ef91a80beb3edadf3fd7fdb858363f9a2cc29ec3d149df40b5cf6035157f8735"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MovieHaat/icon.svg",
+    "jarFileSize": 152303,
+    "fileHash": "sha256-d250322ce74f4c481901fb3669a5eec68e963d3ec0408d5057518f7f73d43907",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 36554,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries"
+    ],
+    "version": 1,
+    "internalName": "MovieHaat",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MovieHaat.jar",
+    "description": "Movie Haat provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MovieHaat.cs3",
+    "name": "MovieHaat",
+    "jarHash": "sha256-25362df77ca34ba0ca3b614df722cec5e956de65950886249d3463678db000bc"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MovieLinkBD/icon.svg",
+    "jarFileSize": 258515,
+    "fileHash": "sha256-31140e13fe71ed04506e5eda9acba250c77e5bd38ee184a5f8b7fbe2eec362c9",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 59402,
+    "status": 1,
+    "language": "bn",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "MovieLinkBD",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MovieLinkBD.jar",
+    "description": "Movie Link BD provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MovieLinkBD.cs3",
+    "name": "MovieLinkBD",
+    "jarHash": "sha256-ce84b1c9511281d1c38451e86d484a8e26d35a1655bc597f13c62c7d38db42f4"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/OnlineMovies/icon.svg",
+    "fileHash": "sha256-243d4048c0373f02a41b48bf6ea16fec82d0acf1d3b2a64cf527a5c6c99070d2",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 43593,
+    "status": 3,
+    "authors": [],
+    "version": -1,
+    "internalName": "OnlineMovies",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/OnlineMovies.cs3",
+    "name": "OnlineMovies"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/YouTube/icon.svg",
+    "jarFileSize": 502498,
+    "fileHash": "sha256-a75a152a0ffede9430d7f013bd45d8e84430768b9a833a095cc613b6a6c522f4",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 77042,
+    "status": 1,
+    "language": "hi",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Other",
+      "Live",
+      "TvSeries"
+    ],
+    "version": 1,
+    "internalName": "YouTube",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/YouTube.jar",
+    "description": "YouTube provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/YouTube.cs3",
+    "name": "YouTube",
+    "jarHash": "sha256-12ec59d8e26047eb54cab2611a7aa6091c7cf86e1b22625589351d7211b7421b"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/YouTubeKids/icon.svg",
+    "jarFileSize": 285565,
+    "fileHash": "sha256-887169c4a4b90369b89c6924f2cf62651f53848b782e65bbaf501edbccc726b8",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 62813,
+    "status": 1,
+    "language": "bn-IN",
+    "authors": [
+      "Movie-Flick"
+    ],
+    "tvTypes": [
+      "Other",
+      "TvSeries"
+    ],
+    "version": 11,
+    "internalName": "YouTubeKids",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/YouTubeKids.jar",
+    "description": "Bengali India YouTube Kids provider for Movie-Flick",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/YouTubeKids.cs3",
+    "name": "YouTubeKids",
+    "jarHash": "sha256-65628e777528e736d9ba0872ec6a6a22ed931bfa69ababec012ee6972aae56e8"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/Zoryva/icon.svg",
+    "jarFileSize": 1019461,
+    "fileHash": "sha256-21c63600c4b441cb4d4ff865b2e8378fedaa91bba500ba068ec2ac539eb367ab",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 206079,
+    "status": 1,
+    "language": "hi",
+    "authors": [
+      "Zoryva"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries",
+      "Anime"
+    ],
+    "version": 23,
+    "internalName": "Zoryva",
+    "jarUrl": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/Zoryva.jar",
+    "description": "Zoryva CloudStream provider",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/Zoryva.cs3",
+    "name": "Zoryva",
+    "jarHash": "sha256-ae82ad8ad9ab2bcff232c076c8def1f5fd9f2e27710ae0b83237becf2492300c"
+  },
+  {
+    "iconUrl": "https://github.com/NivinCNC/CNCVerse-Cloud-Stream-Extension/raw/refs/heads/master/Logos/MovieBoxProvider/icon.png",
+    "fileHash": "sha256-f0d8860fc926166213e2c0693b0ce7d747d8c80440fcddf83360c18412483b2c",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/MyselfHumayunShariarHimu/MovieCloud",
+    "fileSize": 66,
+    "status": 1,
+    "language": "hi",
+    "authors": [
+      "NivinCNC",
+      "MovieCloud"
+    ],
+    "tvTypes": [
+      "Movie",
+      "TvSeries"
+    ],
+    "version": 52,
+    "internalName": "MovieBox",
+    "description": "Multi Language Movies and Series Provider",
+    "url": "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/MovieBox.cs3",
+    "name": "MovieBox"
+  }
+]

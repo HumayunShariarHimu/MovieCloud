@@ -1,0 +1,8 @@
+{
+  "name": "MovieCloud",
+  "description": "MovieCloud CloudStream Extensions",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/plugins.json"
+  ]
+}
