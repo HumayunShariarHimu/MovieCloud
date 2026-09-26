@@ -133,7 +133,7 @@ function directMediaUrl(value){
 
 function providerCatalog(name){return mediaCatalog.providers?.[name]||{};}
 function parseM3U(text){
- const lines=String(text||"").replace(/^\\uFEFF/,"").split(/\\r?\\n/),items=[];let meta={};
+ const lines=String(text||"").replace(/^\uFEFF/,"").split(/\r?\n/),items=[];let meta={};
  for(const raw of lines){const line=raw.trim();if(!line)continue;
   if(line.startsWith("#EXTINF:")){const comma=line.indexOf(",");const attrs=comma>=0?line.slice(8,comma):line.slice(8);const title=comma>=0?line.slice(comma+1).trim():"Untitled";const m=attrs.match(/group-title="([^"]*)"/i);meta={title:title||"Untitled",group:m?m[1]:""};}
   else if(!line.startsWith("#")){const url=directMediaUrl(line);if(url)items.push({...meta,url});meta={};}
