@@ -25,7 +25,7 @@ MovieBox:"https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/
 const STREAMING={
   BasPlayFTP:{url:null,label:"BasPlayFTP",mode:"direct"},CinePlexFTP:{url:"http://cineplexbd.net",label:"CinePlexBD",mode:"direct"},CTGFTP:{url:"https://ctgmovies.com",label:"CTG Movies",mode:"direct"},DhakaFTP:{url:null,label:"DhakaFTP",mode:"direct"},DiscoveryFTP:{url:"https://movies.discoveryftp.net",label:"Discovery Movies",mode:"direct"},HiAnime:{url:"https://hianime.at",label:"HiAnime",mode:"direct"},KhulnaPlex:{url:"http://khulnaplex.com",label:"KhulnaPlex",mode:"direct"},MojaLoss:{url:"https://www.mojaloss.stream",label:"MojaLoss",mode:"direct"},MovieHaat:{url:"https://moviehaat.net",label:"MovieHaat",mode:"direct"},MovieLinkBD:{url:"https://movielinkbd.tv",label:"MovieLinkBD",mode:"direct"},OnlineMovies:{url:"https://111.90.159.132",label:"OnlineMovies",mode:"direct"},YouTube:{url:"https://www.youtube.com",label:"YouTube",mode:"direct"},YouTubeKids:{url:"https://www.youtube.com/kids",label:"YouTube Kids",mode:"direct"},Zoryva:{url:"https://zoryva.me",label:"Zoryva",mode:"direct"},MovieBox:{url:"https://movieboxonline.net",label:"MovieBox",mode:"direct"}
 };
-const PROVIDER_DETAILS=window.MOVIECLOUD_PROVIDER_DETAILS||{};
+const PROVIDER_DETAILS=new Proxy({}, { get(_target,key){ return (window.MOVIECLOUD_PROVIDER_DETAILS||{})[key]; } });
 
 const providers=[
 {name:"BasPlayFTP",desc:"Bangla movie and series provider."},
