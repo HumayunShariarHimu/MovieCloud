@@ -1,7 +1,18 @@
 export const config = { runtime: "nodejs", maxDuration: 300 };
 
-const ALLOWED_HOSTS = new Set(String(process.env.ALLOWED_STREAM_HOSTS || "")
-  .split(",").map(v => v.trim().toLowerCase()).filter(Boolean));
+const ALLOWED_HOST_PATTERNS = String(process.env.ALLOWED_STREAM_HOSTS || "")
+  .split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
+
+function isAllowedHost(url) {
+  const host = url.hostname.toLowerCase();
+  return ALLOWED_HOST_PATTERNS.some(pattern => {
+    if (pattern.startsWith("*.")) {
+      const suffix = pattern.slice(1);
+      return host.endsWith(suffix) && host.length > suffix.length;
+    }
+    return host === pattern;
+  });
+}
 
 const HOP_BY_HOP = new Set([
   "connection","keep-alive","proxy-authenticate","proxy-authorization",
@@ -20,10 +31,6 @@ function json(body, status = 200) {
       "cache-control": "no-store"
     }
   });
-}
-
-function isAllowedHost(url) {
-  return ALLOWED_HOSTS.has(url.hostname.toLowerCase());
 }
 
 function gatewayUrl(target) {
