@@ -54,6 +54,21 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 function fileFor(name,ext){const f=artifacts.providers?.[name]?.[ext];return f?ROOT+f:null;}
 function sourceFor(name){return GH+name;}
 function streamFor(name){return STREAMING[name]||null;}
+function playableFor(name){const sources=mediaCatalog.providers?.[name]?.sources;return Array.isArray(sources)&&sources.some(x=>directMediaUrl(x?.url));}
+let hlsLoadPromise=null;
+function ensureHls(){
+  if(window.Hls)return Promise.resolve(window.Hls);
+  if(hlsLoadPromise)return hlsLoadPromise;
+  hlsLoadPromise=new Promise((resolve,reject)=>{
+    const script=document.createElement("script");
+    script.src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js";
+    script.async=true;
+    script.onload=()=>window.Hls?resolve(window.Hls):reject(new Error("HLS library unavailable"));
+    script.onerror=()=>reject(new Error("HLS library could not be loaded"));
+    document.head.appendChild(script);
+  });
+  return hlsLoadPromise;
+}
 function iconFor(name){const u=ICONS[name];return u?'<img class="icon icon-svg" src="'+u+'" alt="'+esc(name)+' icon" loading="lazy">':'<span class="icon fallback" aria-hidden="true">MC</span>';}
 
 function card(p){
@@ -71,7 +86,7 @@ function card(p){
 
 function render(){
  const q=$("#search").value.trim().toLowerCase(),f=$("#filter").value;
- const list=providers.filter(p=>{const matches=!q||p.name.toLowerCase().includes(q)||p.desc.toLowerCase().includes(q);const mf=f==="all"||(f==="jar"&&fileFor(p.name,"jar"))||(f==="stream"&&streamFor(p.name));return matches&&mf;});
+ const list=providers.filter(p=>{const matches=!q||p.name.toLowerCase().includes(q)||p.desc.toLowerCase().includes(q);const mf=f==="all"||(f==="jar"&&fileFor(p.name,"jar"))||(f==="stream"&&playableFor(p.name));return matches&&mf;});
  $("#providerGrid").innerHTML=list.map(card).join("");
  $("#empty").hidden=list.length>0;
  bindCardActions();
@@ -133,8 +148,7 @@ async function loadM3U(){
  const url=directMediaUrl($("#m3uInput").value),status=$("#playerStatus");
  if(!url){status.textContent="Enter a valid M3U/M3U8 playlist URL.";return;}
  status.textContent="Loading playlist…";
- try{const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const items=parseM3U(await r.text());showPlaylistItems(items);status.textContent=items.length+" playable playlist source(s) found.";}
- catch(error){status.textContent="Playlist could not be read in the browser. If the playlist server blocks CORS, paste the M3U text or use a direct media URL instead.";}
+ try{const gateway="/api/stream?url="+encodeURIComponent(url);const r=await fetch(gateway,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const items=parseM3U(await r.text());showPlaylistItems(items);status.textContent=items.length+" playable playlist source(s) found.";}catch(error){status.textContent="Playlist could not be read. The source may require CORS permission or may not be an authorized direct playlist."; }
 }
 function openStreaming(name){
  ensureModal();
@@ -161,8 +175,17 @@ function playMedia(value){
  shell.innerHTML='<video class="player-frame native-player" id="nativePlayer" controls playsinline preload="metadata" crossorigin="anonymous"></video><div class="player-error" hidden></div>';
  const video=$("#nativePlayer"),err=msg=>{const e=shell.querySelector(".player-error");e.hidden=false;e.textContent=msg;status.textContent=msg;};
  status.textContent=isHls?"Loading HLS through the authorized gateway…":"Loading MP4 through the authorized gateway…";
- if(isHls&&window.Hls&&Hls.isSupported()){const hls=new Hls({enableWorker:true});video.__hls=hls;hls.loadSource(gateway);hls.attachMedia(video);hls.on(Hls.Events.MANIFEST_PARSED,()=>{status.textContent="HLS ready — press Play.";video.play().catch(()=>{});});hls.on(Hls.Events.ERROR,(_,data)=>{if(data?.fatal){try{hls.destroy()}catch{};err("HLS playback failed. Verify the allowlisted host and media manifest.");}});}
- else if(isHls&&video.canPlayType("application/vnd.apple.mpegurl")){video.src=gateway;video.addEventListener("loadedmetadata",()=>{status.textContent="HLS ready — press Play.";video.play().catch(()=>{});});}
+ if(isHls){
+   ensureHls().then(HlsLib=>{
+     if(HlsLib.isSupported()){
+       const hls=new HlsLib({enableWorker:true});video.__hls=hls;hls.loadSource(gateway);hls.attachMedia(video);
+       hls.on(HlsLib.Events.MANIFEST_PARSED,()=>{status.textContent="HLS ready — press Play.";video.play().catch(()=>{});});
+       hls.on(HlsLib.Events.ERROR,(_,data)=>{if(data?.fatal){try{hls.destroy()}catch{};err("HLS playback failed. Verify the allowlisted host and media manifest.");}});
+     } else if(video.canPlayType("application/vnd.apple.mpegurl")){
+       video.src=gateway;video.addEventListener("loadedmetadata",()=>{status.textContent="HLS ready — press Play.";video.play().catch(()=>{});});
+     } else err("This browser does not support HLS playback.");
+   }).catch(()=>err("HLS player could not be loaded. MP4 playback remains available."));
+ }
  else{video.src=gateway;video.addEventListener("loadedmetadata",()=>{status.textContent="MP4 ready — press Play.";});}
  video.addEventListener("error",()=>err("Playback failed. Verify that the URL is a direct MP4/HLS source and its host is configured in ALLOWED_STREAM_HOSTS."));
 }
@@ -197,7 +220,7 @@ async function loadArtifacts(){
  $("#providerCount").textContent=providers.length;
  $("#cs3Count").textContent=vals.filter(x=>x.cs3).length;
  $("#jarCount").textContent=vals.filter(x=>x.jar).length;
- const sc=$("#streamCount");if(sc)sc.textContent=providers.filter(p=>streamFor(p.name)).length;
+ const sc=$("#streamCount");if(sc)sc.textContent=providers.filter(p=>playableFor(p.name)).length;
  render();
 }
 
