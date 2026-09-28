@@ -3,9 +3,9 @@ export const config = { runtime: "nodejs", maxDuration: 300 };
 const ALLOWED_HOST_PATTERNS = String(process.env.ALLOWED_STREAM_HOSTS || "")
   .split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
 
-export function isAllowedHost(url) {
+export function isAllowedHost(url, patterns = ALLOWED_HOST_PATTERNS) {
   const host = url.hostname.toLowerCase();
-  return ALLOWED_HOST_PATTERNS.some(pattern => {
+  return patterns.some(pattern => {
     if (pattern.startsWith("*.")) {
       const suffix = pattern.slice(1);
       return host.endsWith(suffix) && host.length > suffix.length;
@@ -37,11 +37,11 @@ function gatewayUrl(target) {
   return "/api/stream?url=" + encodeURIComponent(target.href);
 }
 
-export function rewriteM3U8(body, baseUrl) {
+export function rewriteM3U8(body, baseUrl, patterns = ALLOWED_HOST_PATTERNS) {
   const rewrite = (raw) => {
     try {
       const absolute = new URL(raw, baseUrl);
-      if (!["http:","https:"].includes(absolute.protocol) || !isAllowedHost(absolute)) return raw;
+      if (!["http:","https:"].includes(absolute.protocol) || !isAllowedHost(absolute, patterns)) return raw;
       return gatewayUrl(absolute);
     } catch {
       return raw;
