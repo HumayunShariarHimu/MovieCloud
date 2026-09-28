@@ -3,7 +3,7 @@ export const config = { runtime: "nodejs", maxDuration: 300 };
 const ALLOWED_HOST_PATTERNS = String(process.env.ALLOWED_STREAM_HOSTS || "")
   .split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
 
-function isAllowedHost(url) {
+export function isAllowedHost(url) {
   const host = url.hostname.toLowerCase();
   return ALLOWED_HOST_PATTERNS.some(pattern => {
     if (pattern.startsWith("*.")) {
@@ -37,7 +37,7 @@ function gatewayUrl(target) {
   return "/api/stream?url=" + encodeURIComponent(target.href);
 }
 
-function rewriteM3U8(body, baseUrl) {
+export function rewriteM3U8(body, baseUrl) {
   const rewrite = (raw) => {
     try {
       const absolute = new URL(raw, baseUrl);
@@ -130,7 +130,7 @@ export default async function handler(req) {
   try {
     upstream = await fetchAllowed(target, req);
   } catch (error) {
-    return json({ error: "Upstream request failed", detail: error?.message || "unknown error" }, 502);
+    return json({ error: "Upstream request failed" }, 502);
   }
 
   const contentType = (upstream.headers.get("content-type") || "").toLowerCase();
@@ -147,6 +147,7 @@ export default async function handler(req) {
   out.set("access-control-expose-headers",
     "Accept-Ranges,Content-Length,Content-Range,Content-Type,ETag,Last-Modified");
   out.set("cache-control", "private, no-store");
+  out.set("x-content-type-options", "nosniff");
 
   if (looksLikeHls && req.method === "GET" && upstream.ok) {
     try {
