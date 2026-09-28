@@ -27,6 +27,7 @@ jobs:
           node --check web/provider-data.js
           node --check web/app.js
           node --input-type=module --check < api/stream.js
+          node --test api/stream.test.js
           ! grep -R '<iframe' index.html web --include='*.html'
 
       - name: Build CloudStream Gradle plugin locally
