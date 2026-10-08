@@ -3,132 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#070914">
-  <meta name="color-scheme" content="dark">
-  <meta name="description" content="MovieCloud — a dark neon CloudStream extension hub for Movie-Flick providers.">
-  <title>MovieCloud — Movie-Flick Extension Hub</title>
-  <link rel="stylesheet" href="./style.css">
+  <meta name="theme-color" content="#070914"><meta name="color-scheme" content="dark">
+  <meta name="description" content="MovieCloud — a CloudStream extension hub with artifact-driven provider discovery and authorized media playback.">
+  <link rel="manifest" href="./manifest.json"><link rel="icon" href="./icon.svg"><link rel="stylesheet" href="./style.css">
+  <title>MovieCloud — Extension Hub</title>
 </head>
 <body>
-  <div class="bg-grid" aria-hidden="true"></div>
-  <div class="glow glow-a" aria-hidden="true"></div>
-  <div class="glow glow-b" aria-hidden="true"></div>
-
-  <header class="topbar">
-    <a class="brand" href="./">
-      <span class="brand-mark">MC</span>
-      <span><b>MovieCloud</b><small>Movie-Flick Extension Hub</small></span>
-    </a>
-    <nav>
-      <a href="#providers">Providers</a>
-      <a href="#install">Install</a>
-      <a href="#about">About</a>
-      <a class="repo-link" href="https://github.com/MyselfHumayunShariarHimu/MovieCloud" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
-    </nav>
-  </header>
-
-  <main>
-    <section class="hero">
-      <div class="hero-copy">
-        <div class="eyebrow"><span class="pulse"></span> MOVIE-FLICK · CLOUDSTREAM</div>
-        <h1>MovieCloud</h1>
-        <p>MovieCloud brings the Movie-Flick provider collection into one fast, mobile-first streaming and CloudStream hub. Download provider packages, inspect repository source maps, and use the native player with repository-declared direct media, M3U/M3U8 playlists, or an authorized direct URL.</p>
-        <div class="hero-actions">
-          <a class="btn primary" href="#providers">Explore providers <span>↓</span></a>
-          <a class="btn ghost" href="#install">How to install</a>
-        </div>
-        <div class="stats">
-          <div><strong id="providerCount">15</strong><small>Providers</small></div>
-          <div><strong id="cs3Count">15</strong><small>CS3 packages</small></div>
-          <div><strong id="jarCount">0</strong><small>Published JARs</small><div class="stat-extra"><strong id="streamCount">11</strong><small>Web hubs</small></div></div>
-        </div>
-      </div>
-      <div class="hero-orb" aria-hidden="true">
-        <div class="orb-core">MC</div>
-        <i></i><i></i><i></i>
-        <span class="orb-chip c1">CS3</span>
-        <span class="orb-chip c2">JAR</span>
-        <span class="orb-chip c3">15×</span>
-      </div>
-    </section>
-
-    <section class="toolbar" id="providers">
-      <div>
-        <div class="section-kicker">PROVIDER DIRECTORY</div>
-        <h2>Movie-Flick providers</h2>
-      </div>
-      <div class="tools">
-        <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search providers…" autocomplete="off"></label>
-        <select id="filter" aria-label="Filter providers">
-          <option value="all">All providers</option>
-          <option value="jar">JAR available</option><option value="stream">Playable sources</option>
-          
-        </select>
-      </div>
-    </section>
-
-    <section class="provider-grid" id="providerGrid" aria-live="polite"></section>
-    <div class="empty" id="empty" hidden>No provider matches your search.</div>
-
-    <section class="install" id="install">
-      <div class="install-panel">
-        <div class="section-kicker">QUICK START</div>
-        <h2>Install a provider in CloudStream</h2>
-        <ol>
-          <li>Open a provider card and choose <b>CS3</b> for the CloudStream plugin package, or choose <b>Media Player</b> to open that provider’s source map and player.</li>
-          <li>The <b>JAR</b> control is functional: when no real JAR exists it opens the artifact explanation instead of acting like a dead link.</li>
-          <li>Use <b>Media Player</b> for repository-declared direct sources, an optional <b>M3U/M3U8 playlist URL</b>, or an authorized direct MP4/HLS source. The provider source map remains visible beside the player.</li>
-        </ol>
-        <p class="note">CloudStream uses the published <b>CS3</b> package. The streaming workspace below each provider uses repository-derived source details, repository-declared automatic sources when available, optional M3U/M3U8 playlists, and an authorized direct-media player; provider pages are never loaded in an iframe.</p>
-      </div>
-      <div class="install-code">
-        <div class="code-head"><span>ARTIFACT ROOT</span><button id="copyRoot">Copy</button></div>
-        <code id="artifactRoot">https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/</code>
-        <div class="code-head second"><span>REPOSITORY</span><a href="https://github.com/MyselfHumayunShariarHimu/MovieCloud" target="_blank" rel="noreferrer">Open ↗</a></div>
-        <code>https://github.com/MyselfHumayunShariarHimu/MovieCloud</code>
-      </div>
-    </section>
-
-    <section class="about" id="about">
-      <div>
-        <div class="section-kicker">ABOUT MOVIECLOUD</div>
-        <h2>Your Movie-Flick collection + streaming workspace.</h2>
-      </div>
-      <p>The web app is a lightweight static frontend with a small Vercel media gateway. Provider metadata, artifact links, source maps and icons are defined in JavaScript. The UI validates artifacts and provides a responsive per-provider streaming workspace.</p>
-    </section>
-  </main>
-
-  <footer>
-    <span>© MovieCloud · Movie-Flick Extension Hub</span>
-    <a href="https://github.com/MyselfHumayunShariarHimu/MovieCloud" target="_blank" rel="noreferrer">Source on GitHub ↗</a>
-  </footer>
-
-    
-<script>
-(function () {
-  const names = ["BasPlayFTP","CinePlexFTP","CTGFTP","DhakaFTP","DiscoveryFTP","HiAnime","KhulnaPlex","MojaLoss","MovieHaat","MovieLinkBD","OnlineMovies","YouTube","YouTubeKids","Zoryva","MovieBox"];
-  const grid = document.getElementById("providerGrid");
-  if (!grid || grid.children.length) return;
-  const root = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/builds/";
-  grid.innerHTML = names.map(function (name) {
-    return '<article class="card static-card"><div class="card-head"><span class="icon fallback">MC</span><div><h3>' +
-      name.replace(/[&<>"]/g, "") +
-      '</h3><span class="tag">CloudStream provider</span></div></div><p class="card-desc">CloudStream extension package and provider source.</p><div class="actions"><a class="cs3" href="' +
-      root + name + '.cs3' +
-      '" target="_blank" rel="noopener noreferrer">CS3 ↗</a><a href="https://github.com/MyselfHumayunShariarHimu/MovieCloud/tree/main/' +
-      name + '" target="_blank" rel="noopener noreferrer">Source ↗</a></div><div class="stream-row"><button class="stream-action" type="button" data-static-stream="' +
-      name + '">Media Player ▶</button></div></article>';
-  }).join("");
-  const count = document.getElementById("providerCount");
-  if (count) count.textContent = String(names.length);
-  const cs3 = document.getElementById("cs3Count");
-  if (cs3) cs3.textContent = String(names.length);
-  const jars = document.getElementById("jarCount");
-  if (jars) jars.textContent = "0";
-})();
-</script>
-
-<script src="./provider-data.js" defer></script>
-  <script src="./app.js" defer></script>
-  </body>
-</html>
+<div class="bg-grid" aria-hidden="true"></div><div class="glow glow-a" aria-hidden="true"></div><div class="glow glow-b" aria-hidden="true"></div>
+<header class="topbar"><a class="brand" href="./" aria-label="MovieCloud home"><span class="brand-mark">MC</span><span><b>MovieCloud</b><small>CloudStream extension hub</small></span></a><nav aria-label="Primary"><a href="#providers">Providers</a><a href="#library">Library</a><a href="#install">Install</a><a class="repo-link" href="https://github.com/HumayunShariarHimu/MovieCloud" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav></header>
+<main>
+<section class="hero" aria-labelledby="hero-title"><div class="hero-copy"><div class="eyebrow"><span class="pulse"></span> MOVIE-FLICK · CLOUDSTREAM</div><h1 id="hero-title">Your entertainment<br><span>universe.</span></h1><p>Discover verified CloudStream providers, download generated artifacts, and use a safe workspace for your own or explicitly authorized direct media. No provider-page scraping, DRM bypass, or unrestricted proxying.</p><div class="hero-actions"><a class="btn primary" href="#providers">Explore providers ↓</a><a class="btn ghost" href="#install">Get started</a><button class="btn ghost" id="installApp" hidden>Install app</button></div><div class="stats"><div><strong id="providerCount">15</strong><small>Providers</small></div><div><strong id="cs3Count">—</strong><small>CS3 ready</small></div><div><strong id="jarCount">—</strong><small>JAR ready</small></div><div><strong id="streamCount">—</strong><small>Web sources</small></div></div></div><div class="hero-orb" aria-hidden="true"><div class="orb-core">MC</div><i></i><i></i><i></i><span class="orb-chip c1">CS3</span><span class="orb-chip c2">PWA</span><span class="orb-chip c3">15×</span></div></section>
+<section class="section-block" id="library"><div class="section-heading"><div><div class="section-kicker">YOUR LIBRARY</div><h2>Continue exploring</h2></div><div class="heading-actions"><span class="library-badge"><b id="favoriteCount">0</b> favorites</span><button class="text-btn" id="clearHistory">Clear history</button><button class="text-btn" id="clearFavorites">Clear favorites</button></div></div><div class="recent-list" id="recentList"><p class="muted">Your recently used providers will appear here.</p></div></section>
+<section class="toolbar" id="providers"><div><div class="section-kicker">PROVIDER DIRECTORY</div><h2>Find your source</h2><p class="muted toolbar-copy">Artifact status is loaded from the generated build manifest.</p></div><div class="tools"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search providers…" autocomplete="off" aria-label="Search providers"></label><select id="category" aria-label="Filter by category"><option value="all">All categories</option><option value="movie">Movies</option><option value="series">Series</option><option value="anime">Anime</option><option value="bd">Bangla / BD</option></select><select id="filter" aria-label="Filter by availability"><option value="all">All providers</option><option value="ready">CS3 ready</option><option value="stream">Playable sources</option><option value="favorite">Favorites</option></select><select id="sort" aria-label="Sort providers"><option value="name">A–Z</option><option value="status">Build status</option><option value="recent">Recently used</option></select></div></section>
+<section class="provider-grid" id="providerGrid" aria-live="polite"></section><div class="empty" id="empty" hidden><h3>No provider matches</h3><p>Try another search or reset your filters.</p></div>
+<section class="install" id="install"><div class="install-panel"><div class="section-kicker">QUICK START</div><h2>Install a provider in CloudStream</h2><ol><li>Choose <b>CS3</b> on a provider card to download the generated CloudStream package.</li><li>Open <b>Details</b> to inspect source ownership, capabilities and build metadata.</li><li>Use <b>Media Player</b> only with an authorized direct MP4/HLS URL whose host is configured in the gateway allowlist.</li></ol><p class="note">The static Pages app never executes Android/Kotlin extractors in the browser. It remains useful as a directory and authorized-media shell while CloudStream handles provider extraction.</p></div><div class="install-code"><div class="code-head"><span>ARTIFACT ROOT</span><button id="copyRoot" type="button">Copy</button></div><code>https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/builds/</code><div class="code-head second"><span>REPOSITORY</span><a href="https://github.com/HumayunShariarHimu/MovieCloud" target="_blank" rel="noopener noreferrer">Open ↗</a></div><code>https://github.com/HumayunShariarHimu/MovieCloud</code><p class="field-help">For Pages, the gateway is not available; direct playback works only where browser CORS permits.</p></div></section>
+<section class="settings-panel" id="settings"><div><div class="section-kicker">SETTINGS</div><h2>Make MovieCloud yours</h2><p class="muted">Preferences stay in this browser only; no account or tracking is required.</p></div><label class="setting-row"><span><b>Reduced motion</b><small>Respect a calmer animation preference.</small></span><input id="reducedMotion" type="checkbox"></label></section>
+<section class="about" id="about"><div><div class="section-kicker">ARCHITECTURE</div><h2>One source of truth.<br>Three production layers.</h2></div><p><b>Extensions</b> preserve the 15+ CloudStream modules. <b>Web</b> consumes generated artifact-index metadata and stores favorites, history and resume state locally. <b>Gateway</b> is a separate Vercel route that fails closed, validates redirects and relays only explicitly allowlisted media.</p></section>
+</main><footer><span>© MovieCloud · Built for authorized media and CloudStream</span><a href="https://github.com/HumayunShariarHimu/MovieCloud" target="_blank" rel="noopener noreferrer">Source on GitHub ↗</a></footer>
+<script src="./provider-data.js"></script><script src="./app.js"></script>
+</body></html>

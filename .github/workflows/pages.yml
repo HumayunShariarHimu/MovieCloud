@@ -1,0 +1,46 @@
+name: Deploy MovieCloud Web
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Validate web and gateway
+        run: npm run check
+      - name: Validate JSON and iframe policy
+        run: |
+          python3 -m json.tool web/manifest.json >/dev/null
+          python3 -m json.tool repo.json >/dev/null
+          ! grep -R '<iframe' web --include='*.html'
+      - name: Assemble static Pages artifact
+        run: |
+          rm -rf _site
+          cp -R web/. _site/
+          touch _site/.nojekyll
+          printf '%s\n' "$(git rev-parse HEAD)" > _site/build-commit.txt
+          test -f _site/index.html
+          test -f _site/manifest.json
+          test -f _site/sw.js
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+  deploy:
+    needs: validate-and-build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
