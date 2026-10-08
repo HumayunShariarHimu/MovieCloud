@@ -4,7 +4,7 @@
   "trailingSlash": false,
   "functions": {
     "api/catalog.js": {
-      "includeFiles": ["web/media-catalog.json"]
+      "includeFiles": "web/media-catalog.json"
     }
   },
   "headers": [
