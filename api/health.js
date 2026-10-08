@@ -1,20 +1,15 @@
 const startedAt = new Date().toISOString();
-const required = ["ALLOWED_STREAM_HOSTS"];
 
-function headers() {
-  return {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-  };
+function setHeaders(res) {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
 }
 
-export default function handler(request) {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: headers() });
-  }
-  const configured = Object.fromEntries(required.map(name => [name, Boolean(process.env[name])]));
+export default function handler(req, res) {
+  setHeaders(res);
+  if (req.method !== "GET" && req.method !== "HEAD") return res.status(405).json({ error: "Method not allowed" });
   const payload = {
     ok: true,
     service: "moviecloud",
@@ -23,11 +18,12 @@ export default function handler(request) {
     startedAt,
     checks: {
       catalog: true,
-      gatewayAllowlistConfigured: configured.ALLOWED_STREAM_HOSTS,
+      gatewayAllowlistConfigured: Boolean(process.env.ALLOWED_STREAM_HOSTS),
       noCredentialProxy: true,
       privateNetworkBlocking: true,
     },
-    configuration: configured,
+    configuration: { ALLOWED_STREAM_HOSTS: Boolean(process.env.ALLOWED_STREAM_HOSTS) },
   };
-  return new Response(request.method === "HEAD" ? null : JSON.stringify(payload), { status: 200, headers: headers() });
+  if (req.method === "HEAD") return res.status(200).end();
+  return res.status(200).json(payload);
 }
