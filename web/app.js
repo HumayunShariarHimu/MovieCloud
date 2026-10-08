@@ -74,7 +74,7 @@ function iconFor(name){const u=ICONS[name];return u?'<img class="icon icon-svg" 
 function card(p){
  const cs3=fileFor(p.name,"cs3"),jar=fileFor(p.name,"jar"),stream=streamFor(p.name),detail=PROVIDER_DETAILS[p.name]||{};
  const status=artifactState==="loading"?'<span class="availability">Checking…</span>':artifactState==="unavailable"?'<span class="availability fail">Index unavailable</span>':cs3?'<span class="availability ok">CS3 ready</span>':'<span class="availability fail">CS3 missing</span>';
- const jarAction=jar?'<a class="jar-action" href="'+jar+'" target="_blank" rel="noopener noreferrer">JAR ↗</a>':'<button class="disabled jar-action jar-help" type="button" data-jar-help="'+esc(p.name)+'" title="No separate JAR artifact is published">JAR</button>';
+ const jarAction=jar?'<a class="jar-action" href="'+jar+'" target="_blank" rel="noopener noreferrer">JAR ↗</a>':'<span class="artifact-unavailable" title="No valid JAR artifact is published">JAR unavailable</span>';
  const site=detail.site?'<a class="site-link" href="'+esc(detail.site)+'" target="_blank" rel="noopener noreferrer">Provider ↗</a>':'<span class="site-link disabled">Network source</span>';
  return '<article class="card" data-name="'+p.name.toLowerCase()+'" data-jar="'+Boolean(jar)+'" data-streaming="'+Boolean(stream)+'">'+status+
  '<div class="card-head">'+iconFor(p.name)+'<div><h3>'+esc(p.name)+'</h3><span class="tag">'+esc(detail.media||"CloudStream provider")+'</span></div></div>'+
@@ -94,7 +94,6 @@ function render(){
 
 function bindCardActions(){
  document.querySelectorAll("[data-stream]").forEach(btn=>btn.addEventListener("click",()=>openStreaming(btn.dataset.stream)));
- document.querySelectorAll("[data-jar-help]").forEach(btn=>btn.addEventListener("click",()=>showJarHelp(btn.dataset.jarHelp)));
  document.querySelectorAll("[data-provider-detail]").forEach(btn=>btn.addEventListener("click",()=>showProviderDetails(btn.dataset.providerDetail)));
 }
 
@@ -106,19 +105,6 @@ function ensureModal(){
  '<header class="stream-modal-head"><div><div class="section-kicker">STREAMING WORKSPACE</div><h2 id="streamTitle">Provider</h2><p id="streamSubtitle">Open the provider website or watch compatible content here.</p></div>'+
  '<button class="modal-close" type="button" data-close-stream aria-label="Close">×</button></header><div id="streamBody"></div></section></div>');
  document.querySelectorAll("[data-close-stream]").forEach(el=>el.addEventListener("click",closeStreaming));
-}
-
-function showJarHelp(name){
- ensureModal();
- $("#streamTitle").textContent=name+" · JAR";
- $("#streamSubtitle").textContent="Artifact status";
- $("#streamBody").innerHTML='<div class="info-panel"><div class="info-icon">JAR</div><h3>No separate JAR published</h3>'+
- '<p>MovieCloud’s current verified build publishes the CloudStream <b>.cs3</b> package. There is no real '+esc(name)+'.jar file in the builds branch, so a fake JAR link is not exposed.</p>'+
- '<div class="info-actions"><button class="btn primary" type="button" data-close-stream>Close</button>'+
- '<a class="btn ghost" href="'+esc(fileFor(name,"cs3")||"#")+'" target="_blank" rel="noopener noreferrer">Open CS3 ↗</a></div></div>';
- $("#streamBody").querySelector("[data-close-stream]").addEventListener("click",closeStreaming);
- $("#streamModal").hidden=false;
- document.body.classList.add("modal-open");
 }
 
 function directMediaUrl(value){
