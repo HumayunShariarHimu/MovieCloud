@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#070914"><meta name="color-scheme" content="dark">
   <meta name="description" content="MovieCloud — a CloudStream extension hub with artifact-driven provider discovery and authorized media playback.">
-  <link rel="manifest" href="./manifest.json"><link rel="icon" href="./icon.svg"><link rel="stylesheet" href="./style.css">
+  <link rel="manifest" href="/web/manifest.json"><link rel="icon" href="/web/icon.svg"><link rel="stylesheet" href="/web/style.css">
   <title>MovieCloud — Extension Hub</title>
 </head>
 <body>
@@ -20,5 +20,5 @@
 <section class="settings-panel" id="settings"><div><div class="section-kicker">SETTINGS</div><h2>Make MovieCloud yours</h2><p class="muted">Preferences stay in this browser only; no account or tracking is required.</p></div><label class="setting-row"><span><b>Reduced motion</b><small>Respect a calmer animation preference.</small></span><input id="reducedMotion" type="checkbox"></label></section>
 <section class="about" id="about"><div><div class="section-kicker">ARCHITECTURE</div><h2>One source of truth.<br>Three production layers.</h2></div><p><b>Extensions</b> preserve the 15+ CloudStream modules. <b>Web</b> consumes generated artifact-index metadata and stores favorites, history and resume state locally. <b>Gateway</b> is a separate Vercel route that fails closed, validates redirects and relays only explicitly allowlisted media.</p></section>
 </main><footer><span>© MovieCloud · Built for authorized media and CloudStream</span><a href="https://github.com/HumayunShariarHimu/MovieCloud" target="_blank" rel="noopener noreferrer">Source on GitHub ↗</a></footer>
-<script src="./provider-data.js"></script><script src="./app.js"></script>
+<script src="/web/provider-data.js"></script><script src="/web/app.js"></script>
 </body></html>

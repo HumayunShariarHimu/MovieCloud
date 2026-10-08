@@ -234,4 +234,4 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeStreaming();});
 ensureModal();
 loadArtifacts();
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/web/sw.js").catch(() => {});
