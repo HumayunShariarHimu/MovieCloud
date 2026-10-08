@@ -8,6 +8,6 @@
   },
   "scripts": {
     "test:gateway": "node --test api/stream.test.js",
-    "check": "node --check web/provider-data.js && node --check web/app.js && node --input-type=module --check < api/stream.js && node --test api/stream.test.js"
+    "check": "node --check web/provider-data.js && node --check web/app.js && node --input-type=module --check < api/stream.js && node --check api/catalog.js && node --check api/health.js && node --test api/stream.test.js"
   }
 }

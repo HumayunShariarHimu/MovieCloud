@@ -202,7 +202,7 @@ function closeStreaming(){
 
 async function loadArtifacts(){
  artifactState="loading";render();
- try{const mr=await fetch("/web/media-catalog.json",{cache:"no-store"});if(mr.ok){const md=await mr.json();if(md&&typeof md.providers==="object")mediaCatalog=md;}}catch{mediaCatalog={providers:{}}}
+ try{const mr=await fetch("/api/catalog",{cache:"no-store"});if(mr.ok){const md=await mr.json();if(md&&typeof md.providers==="object")mediaCatalog=md;}else throw new Error("catalog api unavailable");}catch{mediaCatalog={providers:{}}}
  try{
    const r=await fetch(INDEX,{cache:"no-store"});if(!r.ok)throw new Error();
    const data=await r.json();if(!data||typeof data.providers!=="object")throw new Error();
