@@ -79,6 +79,10 @@ The player accepts direct `.mp4` or `.m3u8` URLs. It supports seeking, browser-n
 
 The complete delivery model, browser compatibility notes, CORS requirements and deployment checklist are documented in [`docs/STREAMING_ARCHITECTURE.md`](docs/STREAMING_ARCHITECTURE.md).
 
+### CDN-first production setup
+
+For public licensed titles, Cloudflare Stream can be used without routing every video segment through Vercel. Set `CLOUDFLARE_STREAM_CUSTOMER_CODE` in Vercel and add a title source with `delivery: "cloudflare-stream"` and its Stream `playbackId`. The catalog API resolves it to the official HLS manifest. Cloudflare R2 custom domains and AWS CloudFront signed URLs are also supported as normal `url` sources. Keep origin secrets, signed-token keys and upload credentials out of the browser and repository.
+
 The project does not scrape provider pages, bypass DRM, accept credential-bearing URLs, relay private-network targets or operate as an unrestricted proxy.
 
 ## Development

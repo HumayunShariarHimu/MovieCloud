@@ -14,11 +14,13 @@
   "$defs": {
     "source": {
       "type": "object",
-      "required": ["label", "type", "url"],
+      "required": ["label", "type"],
       "properties": {
         "label": {"type": "string", "minLength": 1, "maxLength": 120},
         "type": {"type": "string", "enum": ["MP4", "HLS"]},
         "url": {"type": "string", "format": "uri"},
+        "delivery": {"type": "string", "enum": ["cloudflare-stream", "cdn"]},
+        "playbackId": {"type": "string", "minLength": 6, "maxLength": 128},
         "subtitles": {"type": "array", "items": {"type": "object", "required": ["label", "url"], "properties": {"label": {"type": "string"}, "url": {"type": "string", "format": "uri"}}}}
       }
     },
