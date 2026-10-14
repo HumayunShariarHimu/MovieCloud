@@ -100,6 +100,8 @@ The player refreshes live playlists, rewrites HLS child playlists and segments, 
 
 The project does not scrape provider pages, bypass DRM, accept credential-bearing URLs, relay private-network targets or operate as an unrestricted proxy.
 
+The provider-by-provider authorization research is recorded in [`docs/AUTHORIZED_RESOURCES_AUDIT.md`](docs/AUTHORIZED_RESOURCES_AUDIT.md). It found no independently verified, stable, redistribution-authorized direct media URL for the reviewed providers, so the web catalog remains empty until the rights holder supplies an authorized source.
+
 ## Development
 
 Requirements: Node.js 22+, JDK 17 and a compatible Android/CloudStream Gradle environment.
