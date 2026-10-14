@@ -48,6 +48,7 @@ const providers=[
 const $=s=>document.querySelector(s);
 let artifacts={providers:{}};
 let mediaCatalog={providers:{}};
+let titleCatalog=[];
 let artifactState="loading";
 
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
@@ -93,6 +94,24 @@ function render(){
  $("#providerGrid").innerHTML=categorized.map(card).join("");
  $("#empty").hidden=categorized.length>0;
  bindCardActions();
+}
+
+function renderTitles(){
+ const query=$("#titleSearch")?.value.trim().toLowerCase()||"",genre=$("#titleGenre")?.value||"all",grid=$("#titleGrid"),empty=$("#catalogEmpty");
+ if(!grid||!empty)return;
+ const titles=titleCatalog.filter(item=>{const haystack=[item.title,item.description,item.language,...(item.genres||[])].filter(Boolean).join(" ").toLowerCase();return (!query||haystack.includes(query))&&(genre==="all"||(item.genres||[]).includes(genre));});
+ grid.innerHTML=titles.map(item=>{const poster=directMediaUrl(item.poster);const image=poster?`<img class="title-poster" src="${esc(poster)}" alt="${esc(item.title)} poster" loading="lazy">`:'<div class="title-poster" aria-hidden="true">MC</div>';const meta=[item.year,item.language,item.runtime].filter(Boolean).map(esc).join(" · ");return `<article class="title-card"><div>${image}</div><div class="title-body"><h3>${esc(item.title)}</h3><div class="title-meta">${meta||"Authorized title"}</div><p class="title-description">${esc(item.description||"Ready for authorized playback.")}</p><button class="title-watch" type="button" data-title-id="${esc(item.id)}">Watch now ▶</button></div></article>`;}).join("");
+ empty.hidden=titles.length>0;
+ grid.querySelectorAll("[data-title-id]").forEach(button=>button.addEventListener("click",()=>openTitle(titleCatalog.find(item=>item.id===button.dataset.titleId))));
+}
+
+function openTitle(title){
+ if(!title||!Array.isArray(title.sources))return;
+ ensureModal();const sources=title.sources.filter(source=>directMediaUrl(source?.url));
+ $("#streamTitle").textContent=title.title+" · Media Player";$("#streamSubtitle").textContent=[title.year,title.language,title.runtime].filter(Boolean).join(" · ")||"Authorized catalog title";
+ $("#streamBody").innerHTML=`<section class="title-player-panel"><div class="source-list"><div class="source-list-head"><b>Authorized playback sources</b><span>${sources.length} ready</span></div>${sources.map((source,index)=>`<button class="playlist-item" type="button" data-title-source="${index}"><span class="playlist-thumb">▶</span><span class="playlist-copy"><b>${esc(source.label)}</b><small>${esc(source.type)}</small></span><span class="playlist-play">Play</span></button>`).join("")}</div><div class="player-shell" id="playerShell"><div class="player-empty"><span>▶</span><p>Choose an authorized source to start playback.</p></div></div><div class="player-tools"><label for="playbackRate">Speed <select id="playbackRate"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button id="fullscreenPlayer" class="btn ghost" type="button">Fullscreen</button><button id="resetResume" class="btn ghost" type="button">Reset resume</button></div><div class="player-status" id="playerStatus" role="status">Ready.</div></section><div class="browser-note"><b>Playback policy:</b> only catalogued, authorized MP4/HLS sources are playable. DRM and provider-page scraping are not supported.</div>`;
+ document.querySelectorAll("[data-title-source]").forEach(button=>button.addEventListener("click",()=>playMedia(sources[Number(button.dataset.titleSource)].url)));
+ $("#streamModal").hidden=false;document.body.classList.add("modal-open");if(sources.length===1)setTimeout(()=>playMedia(sources[0].url),60);
 }
 
 function bindCardActions(){
@@ -167,8 +186,8 @@ function openStreaming(name){
 }
 function playMedia(value){
  const media=directMediaUrl(value),input=$("#mediaInput"),shell=$("#playerShell"),status=$("#playerStatus");
- if(!media){input.classList.add("input-error");status.textContent="Enter a valid http(s) MP4 or HLS URL.";input.focus();return;}
- input.classList.remove("input-error");
+ if(!media){input?.classList.add("input-error");status.textContent="Enter a valid http(s) MP4 or HLS URL.";input?.focus();return;}
+ input?.classList.remove("input-error");
  const gateway="/api/stream?url="+encodeURIComponent(media),isHls=/\.m3u8(?:$|[?#])/i.test(media);
  shell.innerHTML='<video class="player-frame native-player" id="nativePlayer" controls playsinline preload="metadata" crossorigin="anonymous"></video><div class="player-error" hidden></div>';
  const video=$("#nativePlayer"),err=msg=>{const e=shell.querySelector(".player-error");e.hidden=false;e.textContent=msg;status.textContent=msg;};
@@ -200,7 +219,9 @@ function closeStreaming(){
 
 async function loadArtifacts(){
  artifactState="loading";render();
- try{const mr=await fetch("/api/catalog",{cache:"no-store"});if(mr.ok){const md=await mr.json();if(md&&typeof md.providers==="object")mediaCatalog=md;}else throw new Error("catalog api unavailable");}catch{mediaCatalog={providers:{}}}
+ try{const mr=await fetch("/api/catalog",{cache:"no-store"});if(mr.ok){const md=await mr.json();if(md&&typeof md.providers==="object")mediaCatalog=md;titleCatalog=Array.isArray(md.titles)?md.titles:[];}else throw new Error("catalog api unavailable");}catch{mediaCatalog={providers:{}};titleCatalog=[]}
+ const genreSelect=$("#titleGenre");if(genreSelect){const genres=[...new Set(titleCatalog.flatMap(item=>Array.isArray(item.genres)?item.genres:[]))].sort();genreSelect.innerHTML='<option value="all">All genres</option>'+genres.map(genre=>`<option value="${esc(genre)}">${esc(genre)}</option>`).join("");}
+ const titleCount=$("#titleCount");if(titleCount)titleCount.textContent=String(titleCatalog.length);renderTitles();
  try{
    const r=await fetch(INDEX,{cache:"no-store"});if(!r.ok)throw new Error();
    const data=await r.json();if(!data||typeof data.providers!=="object")throw new Error();
@@ -226,6 +247,8 @@ $("#search").addEventListener("input",render);
 $("#filter").addEventListener("change",render);
 $("#category").addEventListener("change",render);
 $("#sort").addEventListener("change",render);
+$("#titleSearch")?.addEventListener("input",renderTitles);
+$("#titleGenre")?.addEventListener("change",renderTitles);
 $("#copyRoot").addEventListener("click",async()=>{
  try{await navigator.clipboard.writeText(ROOT);const b=$("#copyRoot");b.textContent="Copied ✓";setTimeout(()=>b.textContent="Copy",1000);}
  catch{const b=$("#copyRoot");b.textContent="Copy failed";setTimeout(()=>b.textContent="Copy",1200);}

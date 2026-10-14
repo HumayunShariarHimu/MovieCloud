@@ -1,0 +1,22 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { validateCatalog } from "./catalog.js";
+
+const base = {version: 2, providers: {Demo: {sources: []}}, titles: []};
+
+test("accepts an empty but structurally valid catalog", () => {
+  assert.equal(validateCatalog(base), true);
+});
+
+test("accepts authorized MP4/HLS title sources", () => {
+  assert.equal(validateCatalog({...base, titles: [{id: "sample-title", title: "Sample Title", sources: [{label: "HD", type: "HLS", url: "https://media.example.com/master.m3u8"}]}]}), true);
+});
+
+test("rejects credentials and non-http media URLs", () => {
+  assert.equal(validateCatalog({...base, titles: [{id: "bad-title", title: "Bad", sources: [{label: "Bad", type: "MP4", url: "ftp://media.example.com/file.mp4"}]}]}), false);
+  assert.equal(validateCatalog({...base, titles: [{id: "bad-title", title: "Bad", sources: [{label: "Bad", type: "MP4", url: "https://user:pass@media.example.com/file.mp4"}]}]}), false);
+});
+
+test("rejects unsupported source types and malformed title IDs", () => {
+  assert.equal(validateCatalog({...base, titles: [{id: "Bad ID", title: "Bad", sources: [{label: "Bad", type: "DASH", url: "https://media.example.com/file.mpd"}]}]}), false);
+});
