@@ -10,9 +10,9 @@ cloudstream {
     status = 1
     tvTypes = listOf("Movie","TvSeries","Anime")
     language = "hi"
-    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/Zoryva/icon.svg"
+    iconUrl = "https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/main/Zoryva/icon.svg"
     isCrossPlatform = true
-    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "MyselfHumayunShariarHimu/MovieCloud")
+    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "HumayunShariarHimu/MovieCloud")
 }
 android {
     namespace = "com.movieflick.zoryva"

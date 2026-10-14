@@ -17,7 +17,7 @@ cloudstream {
     status = 1
     tvTypes = listOf("Other","TvSeries")
     language = "bn-IN"
-    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/YouTubeKids/icon.svg"
+    iconUrl = "https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/main/YouTubeKids/icon.svg"
     isCrossPlatform = true
 }
 

@@ -29,7 +29,7 @@ cloudstream {
         "Anime"
     )
     language = "bn"
-    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/CinePlexFTP/icon.svg"
+    iconUrl = "https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/main/CinePlexFTP/icon.svg"
     isCrossPlatform = true
 }
 

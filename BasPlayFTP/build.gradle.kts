@@ -10,6 +10,6 @@ cloudstream {
         "Anime"
     )
     language = "bn"
-    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/BasPlayFTP/icon.svg"
+    iconUrl = "https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/main/BasPlayFTP/icon.svg"
     isCrossPlatform = true
 }

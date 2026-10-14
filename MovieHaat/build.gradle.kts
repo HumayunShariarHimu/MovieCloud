@@ -9,6 +9,6 @@ cloudstream {
         "TvSeries"
     )
     language = "bn"
-    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/MovieHaat/icon.svg"
+    iconUrl = "https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/main/MovieHaat/icon.svg"
     isCrossPlatform = true
 }

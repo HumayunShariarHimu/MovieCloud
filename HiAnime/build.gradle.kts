@@ -29,7 +29,7 @@ cloudstream {
         "Anime"
     )
     language = "en"
-    iconUrl = "https://raw.githubusercontent.com/MyselfHumayunShariarHimu/MovieCloud/main/HiAnime/icon.svg"
+    iconUrl = "https://raw.githubusercontent.com/HumayunShariarHimu/MovieCloud/main/HiAnime/icon.svg"
     isCrossPlatform = true
 }
 

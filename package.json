@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": "24.x"
+    "node": ">=22"
   },
   "scripts": {
     "test:gateway": "node --test api/stream.test.js",
