@@ -18,6 +18,7 @@ MovieCloud brings the repository's CloudStream providers, generated artifacts an
 - Provider source details
 - Native MP4/HLS playback for authorized direct media
 - HLS manifest rewriting through a secure Vercel gateway
+- Resume position, playback speed, fullscreen and playlist controls
 - Favorites, recent providers and playback resume in browser storage
 - PWA install support and offline UI shell
 - GitHub Actions build and GitHub Pages deployment
@@ -75,6 +76,8 @@ ALLOWED_STREAM_HOSTS=media.example.com,cdn.example.com
 ```
 
 The player accepts direct `.mp4` or `.m3u8` URLs. It supports seeking, browser-native controls, HLS.js fallback, resume position and HLS child playlist rewriting.
+
+The complete delivery model, browser compatibility notes, CORS requirements and deployment checklist are documented in [`docs/STREAMING_ARCHITECTURE.md`](docs/STREAMING_ARCHITECTURE.md).
 
 The project does not scrape provider pages, bypass DRM, accept credential-bearing URLs, relay private-network targets or operate as an unrestricted proxy.
 

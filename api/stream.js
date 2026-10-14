@@ -1,10 +1,12 @@
+import { isIP } from "node:net";
+
 export const config = { runtime: "nodejs", maxDuration: 60 };
 const PRIVATE_HOSTS = new Set(["localhost","localhost.localdomain","ip6-localhost","ip6-loopback"]);
 const HOP_BY_HOP = new Set(["connection","keep-alive","proxy-authenticate","proxy-authorization","te","trailer","transfer-encoding","upgrade"]);
 const PASS_HEADERS = ["range","if-range","accept","accept-language","if-none-match","if-modified-since"];
 const patternsFrom = value => String(value || "").split(",").map(v=>v.trim().toLowerCase()).filter(Boolean);
 const configuredPatterns = () => patternsFrom(process.env.ALLOWED_STREAM_HOSTS);
-function isPrivateHost(hostname) { const h=hostname.toLowerCase().replace(/[\[\]]/g,""); if(PRIVATE_HOSTS.has(h)||h.endsWith(".localhost")||h.endsWith(".local")) return true; if(/^127\./.test(h)||/^10\./.test(h)||/^192\.168\./.test(h)||/^169\.254\./.test(h)||/^172\.(1[6-9]|2\d|3[01])\./.test(h)||h==="0.0.0.0"||h==="::1"||h==="::") return true; if(/^[0-9a-f:]+$/i.test(h)&&h.includes(":")) { const first=parseInt(h.split(":")[0]||"0",16); if((first&0xfe00)===0xfc00||(first&0xffc0)===0xfe80) return true; } return false; }
+function isPrivateHost(hostname) { const h=hostname.toLowerCase().replace(/[\[\]]/g,""); if(PRIVATE_HOSTS.has(h)||h.endsWith(".localhost")||h.endsWith(".local")) return true; if(/^127\./.test(h)||/^10\./.test(h)||/^192\.168\./.test(h)||/^169\.254\./.test(h)||/^172\.(1[6-9]|2\d|3[01])\./.test(h)||h==="0.0.0.0"||h==="::1"||h==="::") return true; if(h.startsWith("::ffff:")){const mapped=h.slice(7);if(/^127\.|^10\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\./.test(mapped))return true;} if(isIP(h)===6&&/^[0-9a-f:]+$/i.test(h)) { const first=parseInt(h.split(":")[0]||"0",16); if((first&0xfe00)===0xfc00||(first&0xffc0)===0xfe80) return true; } return false; }
 export function isAllowedHost(url, patterns = configuredPatterns()) { if(!url?.hostname || isPrivateHost(url.hostname)||!patterns.length) return false; const host=url.hostname.toLowerCase(); return patterns.some(pattern=>pattern.startsWith("*.") ? host.endsWith(pattern.slice(1)) && host.length>pattern.length-1 : host===pattern); }
 function json(body,status=200){return new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json; charset=utf-8",...securityHeaders()}})}
 function securityHeaders(){return {"x-content-type-options":"nosniff","referrer-policy":"no-referrer","content-security-policy":"default-src 'none'; frame-ancestors 'none'","permissions-policy":"camera=(), microphone=(), geolocation=()"};}
