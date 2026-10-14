@@ -27,6 +27,18 @@ Cloudflare Stream catalog entries can avoid committing a raw origin URL:
 
 Set `CLOUDFLARE_STREAM_CUSTOMER_CODE` in Vercel. The catalog API then resolves the playback ID to the official Stream manifest URL. For public licensed videos this works without viewer login. For protected titles, the next step is a server-side entitlement check and short-lived signed token endpoint; the private signing key must never be placed in the browser or repository.
 
+### Isolated Cloudflare Worker gateway
+
+MovieCloud also has a separate Worker named `moviecloud-authorized-gateway` at:
+
+```text
+https://moviecloud-authorized-gateway.myself-humayunshariarhimu.workers.dev
+```
+
+It does not create a route on an existing domain and does not modify the existing `tvbox` Worker. It exposes `/health` and an allowlist-only `/stream?url=...` endpoint. It forwards Range headers for MP4, rewrites HLS child playlists and segment URLs, rejects private-network targets, and rejects redirects leaving the configured allowlist. It is intentionally deny-by-default until `ALLOWED_STREAM_HOSTS` is populated with domains the operator owns or is licensed to relay.
+
+Set `MEDIA_GATEWAY_URL` in Vercel only after configuring that Worker binding. The Worker is a delivery adapter, not a provider scraper: an official/authorized CDN URL, HLS manifest, or Cloudflare Stream resource is still required for each live or on-demand title.
+
 HLS is a playlist plus media segments delivered over ordinary HTTP. A player reads the index, requests the listed media files, and continues refreshing a live playlist when there is no `EXT-X-ENDLIST` marker. [1] All HLS resources also need CORS permission for browser playback when they are fetched by a JavaScript player. [2]
 
 ## Implemented player features
@@ -50,9 +62,11 @@ The gateway fails closed when the allowlist is empty. It blocks localhost, `.loc
 ```env
 APP_ORIGIN=https://moviecloudproject.vercel.app
 ALLOWED_STREAM_HOSTS=media.example.com,cdn.example.com
+MEDIA_GATEWAY_URL=https://moviecloud-authorized-gateway.myself-humayunshariarhimu.workers.dev
 ```
 
 - Put only owned or licensed hosts in `ALLOWED_STREAM_HOSTS`.
+- Configure the same allowlist on the isolated Cloudflare Worker before setting `MEDIA_GATEWAY_URL` in Vercel.
 - Publish only direct `.mp4`/`.m3u8` sources in `web/media-catalog.json`.
 - Ensure the origin/CDN serves HLS manifests, segments, keys and subtitles with suitable CORS headers.
 - Confirm byte-range requests work for MP4.

@@ -165,7 +165,7 @@ async function loadM3U(){
  const url=directMediaUrl($("#m3uInput").value),status=$("#playerStatus");
  if(!url){status.textContent="Enter a valid M3U/M3U8 playlist URL.";return;}
  status.textContent="Loading playlist…";
- try{const gateway="/api/stream?url="+encodeURIComponent(url);const r=await fetch(gateway,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const items=parseM3U(await r.text());showPlaylistItems(items);status.textContent=items.length+" playable playlist source(s) found.";}catch(error){status.textContent="Playlist could not be read. The source may require CORS permission or may not be an authorized direct playlist."; }
+ try{const gateway=(mediaCatalog.gateway||"/api/stream").replace(/\/$/,"")+"/stream?url="+encodeURIComponent(url);const r=await fetch(gateway,{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);const items=parseM3U(await r.text());showPlaylistItems(items);status.textContent=items.length+" playable playlist source(s) found.";}catch(error){status.textContent="Playlist could not be read. The source may require CORS permission or may not be an authorized direct playlist."; }
 }
 function openStreaming(name){
  ensureModal();
@@ -188,7 +188,7 @@ function playMedia(value){
  const media=directMediaUrl(value),input=$("#mediaInput"),shell=$("#playerShell"),status=$("#playerStatus");
  if(!media){input?.classList.add("input-error");status.textContent="Enter a valid http(s) MP4 or HLS URL.";input?.focus();return;}
  input?.classList.remove("input-error");
- const gateway="/api/stream?url="+encodeURIComponent(media),isHls=/\.m3u8(?:$|[?#])/i.test(media);
+ const gateway=(mediaCatalog.gateway||"/api/stream").replace(/\/$/,"")+"/stream?url="+encodeURIComponent(media),isHls=/\.m3u8(?:$|[?#])/i.test(media);
  shell.innerHTML='<video class="player-frame native-player" id="nativePlayer" controls playsinline preload="metadata" crossorigin="anonymous"></video><div class="player-error" hidden></div>';
  const video=$("#nativePlayer"),err=msg=>{const e=shell.querySelector(".player-error");e.hidden=false;e.textContent=msg;status.textContent=msg;};
  attachPlayerControls(video,media,status);status.textContent=isHls?"Loading HLS through the authorized gateway…":"Loading MP4 through the authorized gateway…";

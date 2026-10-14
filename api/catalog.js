@@ -45,6 +45,7 @@ export default async function handler(req, res) {
     if (!validateCatalog(catalog)) return res.status(503).json({ error: "Catalog schema is invalid" });
     const payload = {
       ...hydrateCatalog(catalog),
+      gateway: process.env.MEDIA_GATEWAY_URL || "",
       policy: "Only owned or explicitly authorized media URLs may be added. DRM bypass and provider scraping are not supported.",
       generatedAt: new Date().toISOString(),
     };
