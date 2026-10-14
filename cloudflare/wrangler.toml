@@ -1,0 +1,9 @@
+name = "moviecloud-authorized-gateway"
+main = "moviecloud-authorized-gateway.js"
+compatibility_date = "2026-10-14"
+workers_dev = true
+
+[vars]
+# Keep empty until the operator adds domains they own or are licensed to relay.
+APP_ORIGIN = "https://moviecloudproject.vercel.app"
+ALLOWED_STREAM_HOSTS = ""

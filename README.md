@@ -83,6 +83,21 @@ The complete delivery model, browser compatibility notes, CORS requirements and 
 
 For public licensed titles, Cloudflare Stream can be used without routing every video segment through Vercel. Set `CLOUDFLARE_STREAM_CUSTOMER_CODE` in Vercel and add a title source with `delivery: "cloudflare-stream"` and its Stream `playbackId`. The catalog API resolves it to the official HLS manifest. Cloudflare R2 custom domains and AWS CloudFront signed URLs are also supported as normal `url` sources. Keep origin secrets, signed-token keys and upload credentials out of the browser and repository.
 
+### Live channels
+
+Live HLS uses the same player and gateway. Add only an official or licensed live manifest and mark it with `"live": true`:
+
+```json
+{
+  "label": "Live HD",
+  "type": "HLS",
+  "live": true,
+  "url": "https://live.your-authorized-domain.example/channel/master.m3u8"
+}
+```
+
+The player refreshes live playlists, rewrites HLS child playlists and segments, and shows a `LIVE` indicator. A provider webpage URL, `.cs3` file, DRM stream or unlicensed third-party source is not a browser playback source. Configure `ALLOWED_STREAM_HOSTS` on both Vercel and the isolated Worker before publishing. The reproducible Worker configuration is in [`cloudflare/wrangler.toml`](cloudflare/wrangler.toml).
+
 The project does not scrape provider pages, bypass DRM, accept credential-bearing URLs, relay private-network targets or operate as an unrestricted proxy.
 
 ## Development

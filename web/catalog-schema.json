@@ -21,6 +21,7 @@
         "url": {"type": "string", "format": "uri"},
         "delivery": {"type": "string", "enum": ["cloudflare-stream", "cdn"]},
         "playbackId": {"type": "string", "minLength": 6, "maxLength": 128},
+        "live": {"type": "boolean", "description": "True for an authorized live HLS/MP4 channel."},
         "subtitles": {"type": "array", "items": {"type": "object", "required": ["label", "url"], "properties": {"label": {"type": "string"}, "url": {"type": "string", "format": "uri"}}}}
       }
     },

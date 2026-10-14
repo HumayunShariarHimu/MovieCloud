@@ -18,10 +18,13 @@ function setHeaders(res) {
 function validHttpUrl(value) {
   try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; }
 }
-
+function validGatewayUrl(value) {
+  if (!value) return "";
+  try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password ? url.origin : ""; } catch { return ""; }
+}
 export function validateCatalog(catalog) {
   if (!catalog || typeof catalog !== "object" || !Number.isInteger(catalog.version) || !catalog.providers || typeof catalog.providers !== "object" || !Array.isArray(catalog.titles)) return false;
-  const sourceValid = source => source && typeof source === "object" && typeof source.label === "string" && ["MP4", "HLS"].includes(source.type) && (validHttpUrl(source.url) || source.delivery === "cloudflare-stream" && typeof source.playbackId === "string" && /^[A-Za-z0-9_-]{6,128}$/.test(source.playbackId)) && (!source.subtitles || Array.isArray(source.subtitles) && source.subtitles.every(track => typeof track?.label === "string" && validHttpUrl(track.url)));
+  const sourceValid = source => source && typeof source === "object" && typeof source.label === "string" && ["MP4", "HLS"].includes(source.type) && (validHttpUrl(source.url) || source.delivery === "cloudflare-stream" && typeof source.playbackId === "string" && /^[A-Za-z0-9_-]{6,128}$/.test(source.playbackId)) && (source.live === undefined || typeof source.live === "boolean") && (!source.subtitles || Array.isArray(source.subtitles) && source.subtitles.every(track => typeof track?.label === "string" && validHttpUrl(track.url)));
   for (const provider of Object.values(catalog.providers)) if (!provider || !Array.isArray(provider.sources) || !provider.sources.every(sourceValid)) return false;
   return catalog.titles.every(title => typeof title?.id === "string" && /^[a-z0-9][a-z0-9-]{1,79}$/.test(title.id) && typeof title.title === "string" && Array.isArray(title.sources) && title.sources.length > 0 && title.sources.every(sourceValid));
 }
@@ -45,7 +48,7 @@ export default async function handler(req, res) {
     if (!validateCatalog(catalog)) return res.status(503).json({ error: "Catalog schema is invalid" });
     const payload = {
       ...hydrateCatalog(catalog),
-      gateway: process.env.MEDIA_GATEWAY_URL || "",
+      gateway: validGatewayUrl(process.env.MEDIA_GATEWAY_URL),
       policy: "Only owned or explicitly authorized media URLs may be added. DRM bypass and provider scraping are not supported.",
       generatedAt: new Date().toISOString(),
     };
